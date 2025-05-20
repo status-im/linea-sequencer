@@ -24,7 +24,7 @@ plugins {
 // Define versions for gRPC and Protobuf
 ext {
     grpcVersion = '1.70.0' // Align with Besu's BOM
-    protobufVersion = '3.24.4' // Example: Corresponding protobuf version
+    protobufVersion = '3.24.4'
     protocVersion = protobufVersion
 }
 

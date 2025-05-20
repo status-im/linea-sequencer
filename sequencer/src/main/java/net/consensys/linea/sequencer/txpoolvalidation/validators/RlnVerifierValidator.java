@@ -2,7 +2,7 @@ package net.consensys.linea.sequencer.txpoolvalidation.validators;
 
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.rln.jni.RlnBridge;
-// Assuming these gRPC classes will be generated from your .proto file
+
 import net.consensys.linea.rln.proofs.grpc.ProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
@@ -10,7 +10,6 @@ import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Transaction;
 import org.hyperledger.besu.datatypes.Wei;
-import org.hyperledger.besu.datatypes.Quantity;
 import org.hyperledger.besu.plugin.services.BlockchainService;
 import org.hyperledger.besu.plugin.services.txvalidator.PluginTransactionPoolValidator;
 import org.slf4j.Logger;
@@ -30,23 +29,15 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
-import java.sql.Connection;
-import java.sql.DriverManager;
-import java.sql.PreparedStatement;
-import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -66,7 +57,6 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     private static final HttpClient httpClient = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(10))
             .build();
-    private static final Pattern TIER_JSON_PATTERN = Pattern.compile("\"tier\"\s*:\s*\"([^\"]*)\"");
     private static final Pattern KARMA_TIER_JSON_PATTERN = Pattern.compile("\"tier\"\s*:\s*\"([^\"]*)\"");
     private static final Pattern KARMA_EPOCH_TX_COUNT_JSON_PATTERN = Pattern.compile("\"epochTxCount\"\s*:\s*(\\d+)");
     private static final Pattern KARMA_DAILY_QUOTA_JSON_PATTERN = Pattern.compile("\"dailyQuota\"\s*:\s*(\\d+)");
