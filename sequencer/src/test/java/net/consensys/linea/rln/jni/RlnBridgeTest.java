@@ -6,6 +6,7 @@ import org.json.JSONTokener;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.condition.EnabledIfSystemProperty;
+import org.apache.tuweni.bytes.Bytes;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -24,6 +25,7 @@ public class RlnBridgeTest {
 
     private static byte[] verifyingKeyBytes;
     private static JSONArray testProofs;
+    private static JSONObject testData;
 
     @BeforeAll
     static void setUpClass() throws Exception {
@@ -40,17 +42,16 @@ public class RlnBridgeTest {
             throw e;
         }
 
-        // Load test data from JSON file in resources
+        // Load the entire JSON file once
         try (InputStream inputStream = RlnBridgeTest.class.getClassLoader().getResourceAsStream("rln_test_data.json")) {
             if (inputStream == null) {
-                fail("Cannot find rln_test_data.json in test resources.");
+                throw new RuntimeException("Cannot find rln_test_data.json in test resources");
             }
             JSONTokener tokener = new JSONTokener(inputStream);
-            JSONObject testData = new JSONObject(tokener);
-
+            testData = new JSONObject(tokener);
+            // Pre-decode verifying key as it's used for all tests
             String vkHex = testData.getString("verifying_key_hex");
-            verifyingKeyBytes = hexToBytes(vkHex);
-            assertNotNull(verifyingKeyBytes, "Verifying key bytes should not be null");
+            verifyingKeyBytes = Bytes.fromHexString(vkHex).toArrayUnsafe();
 
             testProofs = testData.getJSONArray("test_proofs");
             assertNotNull(testProofs, "Test proofs array should not be null");
@@ -58,7 +59,7 @@ public class RlnBridgeTest {
 
         } catch (Exception e) {
             e.printStackTrace();
-            fail("Error loading or parsing rln_test_data.json: " + e.getMessage());
+            throw new RuntimeException("Failed to load and parse rln_test_data.json", e);
         }
     }
 
@@ -74,7 +75,7 @@ public class RlnBridgeTest {
             JSONObject publicInputsJson = proofEntry.getJSONObject("public_inputs");
             String rawEpochString = proofEntry.optString("raw_epoch_string", "Epoch " + i);
 
-            byte[] proofBytes = hexToBytes(proofHex);
+            byte[] proofBytes = Bytes.fromHexString(proofHex).toArrayUnsafe();
             String[] publicInputsHex = new String[5];
             publicInputsHex[0] = publicInputsJson.getString("share_x");
             publicInputsHex[1] = publicInputsJson.getString("share_y");
@@ -98,21 +99,32 @@ public class RlnBridgeTest {
         System.out.println("Successfully verified " + testProofs.length() + " proofs.");
     }
 
-    // Helper to convert hex string to byte array (from RlnVerifierValidator or similar)
-    private static byte[] hexToBytes(String hex) {
-        if (hex == null || hex.isEmpty()) {
-            throw new IllegalArgumentException("Hex string cannot be null or empty");
+    @Test
+    void testVerifyRlnProof_withValidAndInvalidProofs() {
+        JSONArray proofs = testData.getJSONArray("test_proofs");
+        assertNotNull(proofs, "Test proofs array should not be null");
+        assertTrue(proofs.length() > 0, "Test proofs array should not be empty");
+
+        for (int i = 0; i < proofs.length(); i++) {
+            JSONObject proofEntry = proofs.getJSONObject(i);
+            String proofHex = proofEntry.getString("proof");
+            JSONObject publicInputsJson = proofEntry.getJSONObject("public_inputs");
+
+            byte[] currentProofBytes = Bytes.fromHexString(proofHex).toArrayUnsafe();
+
+            // Prepare publicInputsHex for RlnBridge
+            String[] publicInputsHex = new String[]{
+                publicInputsJson.getString("share_x"),
+                publicInputsJson.getString("share_y"),
+                publicInputsJson.getString("epoch"),
+                publicInputsJson.getString("root"),
+                publicInputsJson.getString("nullifier")
+            };
+
+            // For this test, we assume all proofs in rln_test_data.json are valid against the provided VK.
+            // If you add invalid proofs to the JSON, you'll need a way to label them and assert accordingly.
+            boolean isValid = RlnBridge.verifyRlnProof(verifyingKeyBytes, currentProofBytes, publicInputsHex);
+            assertTrue(isValid, "Proof entry " + i + " (epoch: " + publicInputsJson.getString("epoch") + ", raw_epoch: " + proofEntry.optString("raw_epoch_string") + ") should be valid");
         }
-        String cleanHex = hex.startsWith("0x") ? hex.substring(2) : hex;
-        if (cleanHex.length() % 2 != 0) {
-            // Pad with a leading zero if odd length
-            cleanHex = "0" + cleanHex;
-        }
-        byte[] data = new byte[cleanHex.length() / 2];
-        for (int i = 0; i < cleanHex.length(); i += 2) {
-            data[i / 2] = (byte) ((Character.digit(cleanHex.charAt(i), 16) << 4)
-                    + Character.digit(cleanHex.charAt(i + 1), 16));
-        }
-        return data;
     }
 } 

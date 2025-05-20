@@ -49,6 +49,9 @@ import org.json.JSONTokener;
 import java.io.InputStream;
 //
 
+// Added for Bytes.fromHexString
+import org.apache.tuweni.bytes.Bytes;
+
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class RlnVerifierValidatorTest {
@@ -129,7 +132,7 @@ class RlnVerifierValidatorTest {
             JSONObject testData = new JSONObject(tokener);
 
             String vkHex = testData.getString("verifying_key_hex");
-            jniTestVerifyingKeyBytes = hexToBytesStatic(vkHex); // Use a static version of hexToBytes
+            jniTestVerifyingKeyBytes = Bytes.fromHexString(vkHex).toArrayUnsafe(); // Use Bytes.fromHexString
 
             JSONArray testProofs = testData.getJSONArray("test_proofs");
             if (testProofs.length() > 0) {
@@ -139,6 +142,7 @@ class RlnVerifierValidatorTest {
             }
         } catch (Exception e) {
             LOG.error("Failed to load JNI test data from rln_test_data.json", e);
+            // Let tests run, they might fail if jniTestVerifyingKeyBytes or jniTestFirstValidProofEntry is null
         }
     }
 
@@ -413,22 +417,5 @@ class RlnVerifierValidatorTest {
             "\n(To see validator's current epoch, you might need to log inside RlnVerifierValidator.getCurrentEpochIdentifier() or isProofValidBasedOnEpochAndNullifier)");
         
         System.out.println("RlnVerifierValidatorTest: Finished testValidateTransaction_withValidProof_JNI_Succeeds");
-    }
-
-    // Static version for use in static initializer
-    private static byte[] hexToBytesStatic(String hex) {
-        if (hex == null || hex.isEmpty()) {
-            throw new IllegalArgumentException("Hex string cannot be null or empty");
-        }
-        String cleanHex = hex.startsWith("0x") ? hex.substring(2) : hex;
-        if (cleanHex.length() % 2 != 0) {
-            cleanHex = "0" + cleanHex; // Pad with a leading zero if odd length
-        }
-        byte[] data = new byte[cleanHex.length() / 2];
-        for (int i = 0; i < cleanHex.length(); i += 2) {
-            data[i / 2] = (byte) ((Character.digit(cleanHex.charAt(i), 16) << 4)
-                    + Character.digit(cleanHex.charAt(i + 1), 16));
-        }
-        return data;
     }
 } 

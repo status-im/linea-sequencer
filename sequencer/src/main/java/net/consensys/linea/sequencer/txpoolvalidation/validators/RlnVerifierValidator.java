@@ -50,6 +50,7 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
 import com.google.common.annotations.VisibleForTesting;
+import org.apache.tuweni.bytes.Bytes;
 
 public class RlnVerifierValidator implements PluginTransactionPoolValidator, Closeable {
     private static final Logger LOG = LoggerFactory.getLogger(RlnVerifierValidator.class);
@@ -482,7 +483,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         // Verify the proof using RlnBridge (JNI call)
         boolean rlnProofValid;
         try {
-            rlnProofValid = RlnBridge.verifyRlnProof(rlnVerifyingKeyBytes, hexToBytes(proof.proofBytesHex()), publicInputsHexArray);
+            rlnProofValid = RlnBridge.verifyRlnProof(rlnVerifyingKeyBytes, Bytes.fromHexString(proof.proofBytesHex()).toArrayUnsafe(), publicInputsHexArray);
         } catch (Exception e) { // Catch broader exceptions from JNI if any
             LOG.error("RLN JNI call to verifyRlnProof failed for tx {}: {}", txHashString, e.getMessage(), e);
             return Optional.of(RLN_VALIDATION_FAILED_MESSAGE + ": JNI exception - " + e.getMessage());
@@ -565,23 +566,6 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
             grpcReconnectionScheduler.shutdownNow();
         }
         LOG.info("RlnVerifierValidator resources closed.");
-    }
-
-    private byte[] hexToBytes(String hex) {
-        if (hex == null || hex.isEmpty()) {
-            throw new IllegalArgumentException("Hex string cannot be null or empty");
-        }
-        String cleanHex = hex.startsWith("0x") ? hex.substring(2) : hex;
-        int len = cleanHex.length();
-        if (len == 0 || len % 2 != 0) { // Handle empty string after "0x" removal
-            throw new IllegalArgumentException("Hex string must have an even number of non-empty characters: " + hex);
-        }
-        byte[] data = new byte[len / 2];
-        for (int i = 0; i < len; i += 2) {
-            data[i / 2] = (byte) ((Character.digit(cleanHex.charAt(i), 16) << 4)
-                                 + Character.digit(cleanHex.charAt(i + 1), 16));
-        }
-        return data;
     }
 
     // Test-only helper to access the proof cache
