@@ -89,7 +89,8 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
     validatorsList.add(new AllowedAddressValidator(denied));
     validatorsList.add(new GasLimitValidator(txPoolValidatorConf));
     validatorsList.add(new CalldataValidator(txPoolValidatorConf));
-    validatorsList.add(new ProfitabilityValidator(besuConfiguration, blockchainService, profitabilityConf));
+    validatorsList.add(
+        new ProfitabilityValidator(besuConfiguration, blockchainService, profitabilityConf));
 
     // Conditionally add RLN Validator
     if (rlnValidatorConf.rlnValidationEnabled()) {
@@ -97,12 +98,12 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
     }
 
     validatorsList.add(
-          new SimulationValidator(
-              blockchainService,
-              transactionSimulationService,
-              txPoolValidatorConf,
-              moduleLineLimitsMap,
-              l1L2BridgeConfiguration,
+        new SimulationValidator(
+            blockchainService,
+            transactionSimulationService,
+            txPoolValidatorConf,
+            moduleLineLimitsMap,
+            l1L2BridgeConfiguration,
             rejectedTxJsonRpcManager));
 
     final PluginTransactionPoolValidator[] validators =

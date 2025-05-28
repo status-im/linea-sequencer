@@ -29,8 +29,12 @@ import net.consensys.linea.config.LineaProfitabilityCliOptions;
 import net.consensys.linea.config.LineaProfitabilityConfiguration;
 import net.consensys.linea.config.LineaRejectedTxReportingCliOptions;
 import net.consensys.linea.config.LineaRejectedTxReportingConfiguration;
+import net.consensys.linea.config.LineaRlnValidatorCliOptions;
+import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaRpcCliOptions;
 import net.consensys.linea.config.LineaRpcConfiguration;
+import net.consensys.linea.config.LineaSharedGaslessCliOptions;
+import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.config.LineaTracerCliOptions;
 import net.consensys.linea.config.LineaTracerConfiguration;
 import net.consensys.linea.config.LineaTransactionPoolValidatorCliOptions;
@@ -46,10 +50,6 @@ import org.hyperledger.besu.plugin.services.BlockchainService;
 import org.hyperledger.besu.plugin.services.MetricsSystem;
 import org.hyperledger.besu.plugin.services.RpcEndpointService;
 import org.hyperledger.besu.plugin.services.metrics.MetricCategoryRegistry;
-import net.consensys.linea.config.LineaRlnValidatorCliOptions;
-import net.consensys.linea.config.LineaRlnValidatorConfiguration;
-import net.consensys.linea.config.LineaSharedGaslessCliOptions;
-import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 
 /**
  * This abstract class is used as superclass for all the plugins that share one or more
@@ -102,25 +102,30 @@ public abstract class AbstractLineaSharedPrivateOptionsPlugin
     var sharedGaslessCliOptions = LineaSharedGaslessCliOptions.create();
     configMap.put(
         LineaSharedGaslessCliOptions.CONFIG_KEY,
-        new LineaOptionsPluginConfiguration(sharedGaslessCliOptions, () -> sharedGaslessCliOptions.toDomainObject()));
+        new LineaOptionsPluginConfiguration(
+            sharedGaslessCliOptions, () -> sharedGaslessCliOptions.toDomainObject()));
 
     var rpcCliOptions = LineaRpcCliOptions.create();
     configMap.put(
         LineaRpcCliOptions.CONFIG_KEY,
-        new LineaOptionsPluginConfiguration(rpcCliOptions, () -> {
-            LineaSharedGaslessConfiguration sharedConf = sharedGaslessConfiguration();
-            return rpcCliOptions.toDomainObject(sharedConf);
-        }));
+        new LineaOptionsPluginConfiguration(
+            rpcCliOptions,
+            () -> {
+              LineaSharedGaslessConfiguration sharedConf = sharedGaslessConfiguration();
+              return rpcCliOptions.toDomainObject(sharedConf);
+            }));
 
     var profitabilityCliOptions = LineaProfitabilityCliOptions.create();
     configMap.put(
         LineaProfitabilityCliOptions.CONFIG_KEY,
-        new LineaOptionsPluginConfiguration(profitabilityCliOptions, () -> profitabilityCliOptions.toDomainObject()));
+        new LineaOptionsPluginConfiguration(
+            profitabilityCliOptions, () -> profitabilityCliOptions.toDomainObject()));
 
     var tracerCliOptions = LineaTracerCliOptions.create();
     configMap.put(
-        LineaTracerCliOptions.CONFIG_KEY, 
-        new LineaOptionsPluginConfiguration(tracerCliOptions, () -> tracerCliOptions.toDomainObject()));
+        LineaTracerCliOptions.CONFIG_KEY,
+        new LineaOptionsPluginConfiguration(
+            tracerCliOptions, () -> tracerCliOptions.toDomainObject()));
 
     var rtrCliOptions = LineaRejectedTxReportingCliOptions.create();
     configMap.put(
@@ -129,14 +134,15 @@ public abstract class AbstractLineaSharedPrivateOptionsPlugin
 
     var bundleCliOptions = LineaBundleCliOptions.create();
     configMap.put(
-        LineaBundleCliOptions.CONFIG_KEY, 
-        new LineaOptionsPluginConfiguration(bundleCliOptions, () -> bundleCliOptions.toDomainObject()));
+        LineaBundleCliOptions.CONFIG_KEY,
+        new LineaOptionsPluginConfiguration(
+            bundleCliOptions, () -> bundleCliOptions.toDomainObject()));
 
     var rlnCliOptions = LineaRlnValidatorCliOptions.create();
     configMap.put(
         LineaRlnValidatorCliOptions.CONFIG_KEY,
         new LineaOptionsPluginConfiguration(rlnCliOptions, () -> rlnCliOptions.toDomainObject()));
-        
+
     return configMap;
   }
 

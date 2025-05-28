@@ -40,7 +40,8 @@ public class LineaRpcCliOptions implements LineaCliOptions {
   private static final String RPC_PREMIUM_GAS_MULTIPLIER = "--linea-rpc-premium-gas-multiplier";
   private static final double DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER = 1.5; // Example default
 
-  private static final String RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS = "--linea-rpc-allow-zero-gas-estimation-gasless";
+  private static final String RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS =
+      "--linea-rpc-allow-zero-gas-estimation-gasless";
   private static final boolean DEFAULT_RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS = false;
 
   @CommandLine.Option(
@@ -62,19 +63,22 @@ public class LineaRpcCliOptions implements LineaCliOptions {
   @CommandLine.Option(
       names = {RPC_GASLESS_ENABLED},
       paramLabel = "<BOOLEAN>",
-      description = "Enable gasless transaction features in RPC methods like linea_estimateGas (default: ${DEFAULT-VALUE})")
+      description =
+          "Enable gasless transaction features in RPC methods like linea_estimateGas (default: ${DEFAULT-VALUE})")
   private boolean gaslessTransactionsEnabled = DEFAULT_RPC_GASLESS_ENABLED;
 
   @CommandLine.Option(
       names = {RPC_PREMIUM_GAS_MULTIPLIER},
       paramLabel = "<DOUBLE>",
-      description = "Multiplier for calculating premium gas price in estimateGas for denied users (default: ${DEFAULT-VALUE})")
+      description =
+          "Multiplier for calculating premium gas price in estimateGas for denied users (default: ${DEFAULT-VALUE})")
   private double premiumGasMultiplier = DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER;
 
   @CommandLine.Option(
       names = {RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS},
       paramLabel = "<BOOLEAN>",
-      description = "Allow linea_estimateGas to return 0 for gasless transactions if user is not on deny list (default: ${DEFAULT-VALUE})")
+      description =
+          "Allow linea_estimateGas to return 0 for gasless transactions if user is not on deny list (default: ${DEFAULT-VALUE})")
   private boolean allowZeroGasEstimationForGasless = DEFAULT_RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS;
 
   private LineaRpcCliOptions() {}

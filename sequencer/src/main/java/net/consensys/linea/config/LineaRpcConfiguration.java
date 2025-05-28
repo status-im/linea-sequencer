@@ -31,21 +31,15 @@ import net.consensys.linea.plugins.LineaOptionsConfiguration;
 @Getter
 @ToString
 public class LineaRpcConfiguration implements LineaOptionsConfiguration {
-  @Builder.Default
-  @Setter private volatile boolean estimateGasCompatibilityModeEnabled = false;
+  @Builder.Default @Setter private volatile boolean estimateGasCompatibilityModeEnabled = false;
 
-  @Builder.Default
-  private BigDecimal estimateGasCompatibilityMultiplier = BigDecimal.valueOf(1.2);
+  @Builder.Default private BigDecimal estimateGasCompatibilityMultiplier = BigDecimal.valueOf(1.2);
 
-  @Builder.Default
-  private final boolean gaslessTransactionsEnabled = false;
+  @Builder.Default private final boolean gaslessTransactionsEnabled = false;
 
-  @Builder.Default
-  private final double premiumGasMultiplier = 1.5;
+  @Builder.Default private final double premiumGasMultiplier = 1.5;
 
-  @Builder.Default
-  private final boolean allowZeroGasEstimationForGasless = false;
+  @Builder.Default private final boolean allowZeroGasEstimationForGasless = false;
 
-  @NonNull
-  private final LineaSharedGaslessConfiguration sharedGaslessConfig;
+  @NonNull private final LineaSharedGaslessConfiguration sharedGaslessConfig;
 }

@@ -23,9 +23,9 @@ plugins {
 
 // Define versions for gRPC and Protobuf
 ext {
-    grpcVersion = '1.70.0' // Align with Besu's BOM
-    protobufVersion = '3.24.4'
-    protocVersion = protobufVersion
+  grpcVersion = '1.70.0' // Align with Besu's BOM
+  protobufVersion = '3.24.4'
+  protocVersion = protobufVersion
 }
 
 group = 'net.consensys.linea.besu.plugin'
@@ -109,23 +109,23 @@ protobuf {
 
 // Add system property to disable macOS DNS resolver for Netty in tests
 tasks.withType(Test) {
-    systemProperty 'io.netty.resolver.dns.macos.disabled', 'true'
-    useJUnitPlatform()
-    testLogging {
-        events "passed", "skipped", "failed"
-        showStandardStreams = true // To see System.out/err from tests
-    }
-    def nativeLibDir = file("src/main/rust/rln_bridge/target/release").absolutePath
-    systemProperty "java.library.path", nativeLibDir
+  systemProperty 'io.netty.resolver.dns.macos.disabled', 'true'
+  useJUnitPlatform()
+  testLogging {
+    events "passed", "skipped", "failed"
+    showStandardStreams = true // To see System.out/err from tests
+  }
+  def nativeLibDir = file("src/main/rust/rln_bridge/target/release").absolutePath
+  systemProperty "java.library.path", nativeLibDir
 }
 
 sourceSets {
-    main {
-        java {
-            srcDir 'build/generated/source/proto/main/grpc'
-            srcDir 'build/generated/source/proto/main/java'
-        }
+  main {
+    java {
+      srcDir 'build/generated/source/proto/main/grpc'
+      srcDir 'build/generated/source/proto/main/java'
     }
+  }
 }
 
 apply from: rootProject.file("gradle/dist.gradle")
