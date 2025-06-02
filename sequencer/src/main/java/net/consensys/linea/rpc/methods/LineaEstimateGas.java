@@ -20,22 +20,11 @@ import static net.consensys.linea.sequencer.modulelimit.ModuleLineCountValidator
 import static net.consensys.linea.zktracer.Fork.LONDON;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.Quantity.create;
 
-import java.io.BufferedReader;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -44,7 +33,6 @@ import lombok.extern.slf4j.Slf4j;
 import net.consensys.linea.bl.TransactionProfitabilityCalculator;
 import net.consensys.linea.config.LineaProfitabilityConfiguration;
 import net.consensys.linea.config.LineaRpcConfiguration;
-import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.config.LineaTransactionPoolValidatorConfiguration;
 import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
 import net.consensys.linea.sequencer.modulelimit.ModuleLimitsValidationResult;
@@ -107,15 +95,6 @@ public class LineaEstimateGas {
   private LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration;
   private ModuleLineCountValidator moduleLineCountValidator;
 
-  // New fields for gasless/deny list features
-  private boolean gaslessTransactionsEnabled;
-  private Optional<String> denyListPathOpt;
-  private LineaSharedGaslessConfiguration sharedGaslessConfig;
-  private double premiumGasMultiplier;
-  private boolean allowZeroGasEstimationForGasless;
-  private final Set<Address> denyListCache = ConcurrentHashMap.newKeySet();
-  private ScheduledExecutorService denyListRefreshScheduler;
-
   public LineaEstimateGas(
       final BesuConfiguration besuConfiguration,
       final TransactionSimulationService transactionSimulationService,
@@ -128,93 +107,17 @@ public class LineaEstimateGas {
   }
 
   public void init(
-      final LineaRpcConfiguration rpcConfig,
+      final LineaRpcConfiguration rpcConfiguration,
       final LineaTransactionPoolValidatorConfiguration transactionValidatorConfiguration,
       final LineaProfitabilityConfiguration profitabilityConf,
       final Map<String, Integer> limitsMap,
       final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration) {
-    this.rpcConfiguration = rpcConfig;
+    this.rpcConfiguration = rpcConfiguration;
     this.txValidatorConf = transactionValidatorConfiguration;
     this.profitabilityConf = profitabilityConf;
     this.txProfitabilityCalculator = new TransactionProfitabilityCalculator(profitabilityConf);
     this.l1L2BridgeConfiguration = l1L2BridgeConfiguration;
     this.moduleLineCountValidator = new ModuleLineCountValidator(limitsMap);
-    this.maxTxGasLimit = UInt256.valueOf(txValidatorConf.maxTxGasLimit());
-
-    // Initialize new gasless config fields
-    this.gaslessTransactionsEnabled = rpcConfig.gaslessTransactionsEnabled();
-    if (this.gaslessTransactionsEnabled) {
-      this.sharedGaslessConfig = rpcConfig.sharedGaslessConfig();
-      if (this.sharedGaslessConfig != null) {
-        this.denyListPathOpt = Optional.ofNullable(this.sharedGaslessConfig.denyListPath());
-      } else {
-        this.denyListPathOpt = Optional.empty();
-        log.warn(
-            "LineaRpcConfiguration provided null sharedGaslessConfig while gasless transactions are enabled.");
-      }
-      this.premiumGasMultiplier = rpcConfig.premiumGasMultiplier();
-      this.allowZeroGasEstimationForGasless = rpcConfig.allowZeroGasEstimationForGasless();
-      long refreshInterval = 0L;
-      if (this.sharedGaslessConfig != null) {
-        refreshInterval = this.sharedGaslessConfig.denyListRefreshSeconds();
-      } else {
-        // This case should ideally not happen if gaslessTransactionsEnabled is true
-        // and sharedGaslessConfig was intended to be mandatory.
-        // However, to prevent NullPointerException if logic changes or there's an oversight:
-        log.warn(
-            "sharedGaslessConfig is null even though gaslessTransactionsEnabled is true. Deny list refresh will be disabled.");
-      }
-
-      if (this.denyListPathOpt.isEmpty()) {
-        log.warn(
-            "Gasless transactions enabled, but deny list path is not configured. Deny list checks will be skipped.");
-      } else {
-        loadDenyListFromFile();
-        if (refreshInterval > 0) {
-          denyListRefreshScheduler =
-              Executors.newSingleThreadScheduledExecutor(
-                  r -> new Thread(r, "linea-estimate-gas-deny-list-refresher"));
-          denyListRefreshScheduler.scheduleAtFixedRate(
-              this::loadDenyListFromFile, refreshInterval, refreshInterval, TimeUnit.SECONDS);
-          log.info(
-              "Scheduled deny list refresh every {} seconds from {}.",
-              refreshInterval,
-              denyListPathOpt.get());
-        }
-      }
-    } else {
-      log.info("Gasless transaction features for linea_estimateGas are DISABLED.");
-    }
-  }
-
-  private void loadDenyListFromFile() {
-    denyListPathOpt.ifPresent(
-        path -> {
-          if (!Files.exists(Paths.get(path))) {
-            log.warn("Deny list file not found at {}, clearing cache.", path);
-            denyListCache.clear();
-            return;
-          }
-          Set<Address> newDenyList = new HashSet<>();
-          try (BufferedReader reader =
-              Files.newBufferedReader(Paths.get(path), StandardCharsets.UTF_8)) {
-            String line;
-            int count = 0;
-            while ((line = reader.readLine()) != null) {
-              try {
-                newDenyList.add(Address.fromHexString(line.trim()));
-                count++;
-              } catch (IllegalArgumentException e) {
-                log.warn("Invalid address format in deny list file '{}': '{}'", path, line.trim());
-              }
-            }
-            denyListCache.clear();
-            denyListCache.addAll(newDenyList);
-            log.info("Deny list reloaded successfully from {}. {} addresses cached.", path, count);
-          } catch (IOException e) {
-            log.error("Error loading deny list from {}: {}", path, e.getMessage(), e);
-          }
-        });
   }
 
   public String getNamespace() {
@@ -240,59 +143,6 @@ public class LineaEstimateGas {
       final var callParameters = parseCallParameters(request.getParams());
       final var maybeStateOverrides = getStateOverrideMap(request.getParams());
       final var minGasPrice = besuConfiguration.getMinGasPrice();
-
-      // --- Linea Gasless Logic Start ---
-      if (gaslessTransactionsEnabled && callParameters.getFrom() != null) {
-        Address sender = callParameters.getFrom();
-        boolean isOnDenyList = denyListPathOpt.isPresent() && denyListCache.contains(sender);
-
-        if (isOnDenyList) {
-          log.info(
-              "[{}] Sender {} is on the deny list. Applying premium gas multiplier of {}.",
-              logId,
-              sender.toHexString(),
-              premiumGasMultiplier);
-          // Proceed to estimate gas, then multiply.
-          final long originalGasEstimate =
-              estimateOriginalGas(callParameters, maybeStateOverrides, minGasPrice, logId);
-          final long premiumGasEstimate = (long) (originalGasEstimate * premiumGasMultiplier);
-
-          // Fees are determined by the market, but the gas limit is inflated.
-          final Wei baseFee = blockchainService.getNextBlockBaseFee().orElse(Wei.ZERO);
-          final Transaction tempTxForFeeEstimation =
-              createTransactionForSimulation(callParameters, premiumGasEstimate, baseFee, logId);
-          final Wei estimatedPriorityFee =
-              getEstimatedPriorityFee(
-                  tempTxForFeeEstimation, baseFee, minGasPrice, premiumGasEstimate);
-
-          log.info(
-              "[{}] Deny list sender {}: Original estimate {}, Premium estimate {}.",
-              logId,
-              sender.toHexString(),
-              originalGasEstimate,
-              premiumGasEstimate);
-          return new Response(
-              create(premiumGasEstimate), create(baseFee), create(estimatedPriorityFee));
-        }
-
-        // Not on deny list, and gasless mode is on for RPC
-        if (allowZeroGasEstimationForGasless) {
-          // User is eligible for gasless, return 0 for gas fields
-          // Actual gas will be calculated by backend, but user sees 0.
-          log.info(
-              "[{}] Sender {} is eligible for gasless estimation (not on deny list). Returning 0 gas.",
-              logId,
-              sender.toHexString());
-          return new Response(create(0L), create(Wei.ZERO), create(Wei.ZERO));
-        }
-        // If !allowZeroGasEstimationForGasless, proceed to normal estimation below even if not on
-        // deny list.
-      }
-      // --- Linea Gasless Logic End ---
-
-      // Original estimation logic (also used as fallback or if gasless mode disabled)
-      final long estimatedGasUsed =
-          estimateOriginalGas(callParameters, maybeStateOverrides, minGasPrice, logId);
       final Wei baseFee =
           blockchainService
               .getNextBlockBaseFee()
@@ -300,8 +150,21 @@ public class LineaEstimateGas {
                   () ->
                       new PluginRpcEndpointException(
                           RpcErrorType.INVALID_REQUEST, "Not on a baseFee market"));
-      final Transaction transaction =
-          createTransactionForSimulation(callParameters, estimatedGasUsed, baseFee, logId);
+
+      log.debug("[{}] Parsed call parameters: {}", logId, callParameters);
+      final long gasEstimation = getGasEstimation(callParameters, maybeStateOverrides, logId);
+
+      final var transaction =
+          createTransactionForSimulation(callParameters, gasEstimation, baseFee, logId);
+      log.atDebug()
+          .setMessage("[{}] Transaction: {}; Gas estimation {}")
+          .addArgument(logId)
+          .addArgument(transaction::toTraceLog)
+          .addArgument(gasEstimation)
+          .log();
+
+      validateLineCounts(maybeStateOverrides, transaction, logId);
+
       final Wei estimatedPriorityFee =
           getEstimatedPriorityFee(transaction, baseFee, minGasPrice, gasEstimation);
 
@@ -322,52 +185,14 @@ public class LineaEstimateGas {
     }
   }
 
-  private long estimateOriginalGas(
-      final JsonCallParameter callParameters,
+  private Long getGasEstimation(
+      final CallParameter callParameter,
       final Optional<StateOverrideMap> maybeStateOverrides,
-      final Wei minGasPrice,
       final long logId) {
-    final long gasLimitUpperBound = calculateGasLimitUpperBound(callParameters, logId);
-    final Wei baseFee = blockchainService.getNextBlockBaseFee().orElse(Wei.ZERO);
-    final Transaction transaction =
-
-    return estimateGasUsed(callParameters, maybeStateOverrides, transaction, baseFee, logId);
-  }
-
-  private long calculateGasLimitUpperBound(
-      final JsonCallParameter callParameters, final long logId) {
-    if (callParameters.getFrom() != null) {
-      final var sender = callParameters.getFrom();
-      final var maxGasPrice = calculateTxMaxGasPrice(callParameters);
-      log.atTrace()
-          .setMessage("[{}] Calculated max gas price {}")
-          .addArgument(logId)
-          .addArgument(maxGasPrice)
-          .log();
-      if (maxGasPrice != null) {
-        final Wei balance = getSenderBalance(sender, logId);
-        if (balance.greaterThan(Wei.ZERO)) {
-          final var value = callParameters.getValue();
-          final var balanceForGas = value == null ? balance : balance.subtract(value);
-          final var gasLimitForBalance = balanceForGas.divide(maxGasPrice).toUInt256();
-          if (gasLimitForBalance.lessThan(maxTxGasLimit)) {
-            final var gasLimitUpperBound = gasLimitForBalance.toLong();
-            log.atTrace()
-                .setMessage(
-                    "[{}] Calculated gasLimitUpperBound {}; gasLimitForBalance {}, balance {}, value {}, balanceForGas {}, maxGasPrice {}")
-                .addArgument(logId)
-                .addArgument(gasLimitUpperBound)
-                .addArgument(gasLimitForBalance::toDecimalString)
-                .addArgument(balance::toHumanReadableString)
-                .addArgument(value::toHumanReadableString)
-                .addArgument(balanceForGas::toHumanReadableString)
-                .addArgument(maxGasPrice::toHumanReadableString)
-                .log();
-            return gasLimitUpperBound;
-          }
-        }
-      }
-    }
+    final var params =
+        maybeStateOverrides.isPresent()
+            ? new Object[] {callParameter, "pending", maybeStateOverrides.get()}
+            : new Object[] {callParameter, "pending"};
 
     final var resp = rpcEndpointService.call("eth_estimateGas", params);
     if (!resp.getType().equals(RpcResponseType.SUCCESS)) {
@@ -385,6 +210,7 @@ public class LineaEstimateGas {
         .log();
     return gasEstimation;
   }
+
   private Wei getEstimatedPriorityFee(
       final Transaction transaction,
       final Wei baseFee,
@@ -628,63 +454,6 @@ public class LineaEstimateGas {
     @Override
     public String getMessage() {
       return errorReason;
-    }
-  }
-
-  private static class EstimateGasOperationTracer implements OperationTracer {
-
-    private int maxDepth = 0;
-
-    private long sStoreStipendNeeded = 0L;
-
-    /** Default constructor. */
-    public EstimateGasOperationTracer() {}
-
-    @Override
-    public void tracePostExecution(
-        final MessageFrame frame, final Operation.OperationResult operationResult) {
-      if (frame.getCurrentOperation() instanceof SStoreOperation sStoreOperation
-          && sStoreStipendNeeded == 0L) {
-        sStoreStipendNeeded = sStoreOperation.getMinimumGasRemaining();
-      }
-      if (maxDepth < frame.getDepth()) {
-        maxDepth = frame.getDepth();
-      }
-    }
-
-    /**
-     * Gets max depth.
-     *
-     * @return the max depth
-     */
-    public int getMaxDepth() {
-      return maxDepth;
-    }
-
-    /**
-     * Gets stipend needed.
-     *
-     * @return the stipend needed
-     */
-    public long getStipendNeeded() {
-      return sStoreStipendNeeded;
-    }
-  }
-
-  // Method to stop the scheduler when the plugin stops (needs to be called from plugin's stop
-  // lifecycle)
-  public void stop() {
-    if (denyListRefreshScheduler != null) {
-      denyListRefreshScheduler.shutdown();
-      try {
-        if (!denyListRefreshScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-          denyListRefreshScheduler.shutdownNow();
-        }
-      } catch (InterruptedException e) {
-        denyListRefreshScheduler.shutdownNow();
-        Thread.currentThread().interrupt();
-      }
-      log.info("Deny list refresh scheduler stopped.");
     }
   }
 }

@@ -32,4 +32,3 @@ site/
 /.direnv/
 /.envrc
 acceptance-tests/bin/
-.vscode

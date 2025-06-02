@@ -15,14 +15,12 @@
 
 package net.consensys.linea.sequencer.txpoolvalidation;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 
 import net.consensys.linea.config.LineaProfitabilityConfiguration;
-import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaTransactionPoolValidatorConfiguration;
 import net.consensys.linea.jsonrpc.JsonRpcManager;
 import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
@@ -30,7 +28,6 @@ import net.consensys.linea.sequencer.txpoolvalidation.validators.AllowedAddressV
 import net.consensys.linea.sequencer.txpoolvalidation.validators.CalldataValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.GasLimitValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.ProfitabilityValidator;
-import net.consensys.linea.sequencer.txpoolvalidation.validators.RlnVerifierValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.SimulationValidator;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
@@ -51,7 +48,6 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
   private final Map<String, Integer> moduleLineLimitsMap;
   private final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration;
   private final Optional<JsonRpcManager> rejectedTxJsonRpcManager;
-  private final LineaRlnValidatorConfiguration rlnValidatorConf;
 
   public LineaTransactionPoolValidatorFactory(
       final BesuConfiguration besuConfiguration,
@@ -62,8 +58,7 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
       final Set<Address> deniedAddresses,
       final Map<String, Integer> moduleLineLimitsMap,
       final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration,
-      final Optional<JsonRpcManager> rejectedTxJsonRpcManager,
-      final LineaRlnValidatorConfiguration rlnValidatorConf) {
+      final Optional<JsonRpcManager> rejectedTxJsonRpcManager) {
     this.besuConfiguration = besuConfiguration;
     this.blockchainService = blockchainService;
     this.transactionSimulationService = transactionSimulationService;
@@ -73,7 +68,6 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
     this.moduleLineLimitsMap = moduleLineLimitsMap;
     this.l1L2BridgeConfiguration = l1L2BridgeConfiguration;
     this.rejectedTxJsonRpcManager = rejectedTxJsonRpcManager;
-    this.rlnValidatorConf = rlnValidatorConf;
   }
 
   /**
@@ -84,30 +78,20 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
    */
   @Override
   public PluginTransactionPoolValidator createTransactionValidator() {
-    final var validatorsList = new ArrayList<PluginTransactionPoolValidator>();
-
-    validatorsList.add(new AllowedAddressValidator(denied));
-    validatorsList.add(new GasLimitValidator(txPoolValidatorConf));
-    validatorsList.add(new CalldataValidator(txPoolValidatorConf));
-    validatorsList.add(
-        new ProfitabilityValidator(besuConfiguration, blockchainService, profitabilityConf));
-
-    // Conditionally add RLN Validator
-    if (rlnValidatorConf.rlnValidationEnabled()) {
-      validatorsList.add(new RlnVerifierValidator(rlnValidatorConf, blockchainService));
-    }
-
-    validatorsList.add(
-        new SimulationValidator(
-            blockchainService,
-            transactionSimulationService,
-            txPoolValidatorConf,
-            moduleLineLimitsMap,
-            l1L2BridgeConfiguration,
-            rejectedTxJsonRpcManager));
-
-    final PluginTransactionPoolValidator[] validators =
-        validatorsList.toArray(new PluginTransactionPoolValidator[0]);
+    final var validators =
+        new PluginTransactionPoolValidator[] {
+          new AllowedAddressValidator(denied),
+          new GasLimitValidator(txPoolValidatorConf),
+          new CalldataValidator(txPoolValidatorConf),
+          new ProfitabilityValidator(besuConfiguration, blockchainService, profitabilityConf),
+          new SimulationValidator(
+              blockchainService,
+              transactionSimulationService,
+              txPoolValidatorConf,
+              moduleLineLimitsMap,
+              l1L2BridgeConfiguration,
+              rejectedTxJsonRpcManager)
+        };
 
     return (transaction, isLocal, hasPriority) ->
         Arrays.stream(validators)

@@ -18,14 +18,6 @@ plugins {
   id 'java-library-distribution'
   id 'common-plugins'
   id 'de.undercouch.download'
-  id 'com.google.protobuf' version '0.9.4'
-}
-
-// Define versions for gRPC and Protobuf
-ext {
-  grpcVersion = '1.70.0' // Align with Besu's BOM
-  protobufVersion = '3.24.4'
-  protocVersion = protobufVersion
 }
 
 group = 'net.consensys.linea.besu.plugin'
@@ -70,63 +62,10 @@ dependencies {
 
   implementation 'org.hibernate.validator:hibernate-validator'
 
-  // gRPC and Protobuf dependencies
-  implementation "io.grpc:grpc-netty:${grpcVersion}"
-  implementation "io.grpc:grpc-protobuf:${grpcVersion}"
-  implementation "io.grpc:grpc-stub:${grpcVersion}"
-  implementation "io.grpc:grpc-api:${grpcVersion}"
-  implementation "com.google.protobuf:protobuf-java:${protobufVersion}"
-  implementation 'javax.annotation:javax.annotation-api:1.3.2'
-
   testImplementation "${besuArtifactGroup}.internal:besu"
   testImplementation group: "${besuArtifactGroup}.internal", name: "core", classifier: "test-support"
 
   testImplementation 'org.awaitility:awaitility'
-  testImplementation 'org.json:json:20231013'
-  testImplementation 'org.mockito:mockito-inline:5.2.0'
-  testImplementation "io.grpc:grpc-testing:${grpcVersion}"
-  testImplementation "io.grpc:grpc-core:${grpcVersion}"
-  testImplementation "io.grpc:grpc-inprocess:${grpcVersion}"
-}
-
-// Protobuf configuration
-protobuf {
-  protoc {
-    artifact = "com.google.protobuf:protoc:${protocVersion}"
-  }
-  plugins {
-    grpc {
-      artifact = "io.grpc:protoc-gen-grpc-java:${grpcVersion}"
-    }
-  }
-  generateProtoTasks {
-    all().each { task ->
-      task.plugins {
-        grpc {}
-      }
-    }
-  }
-}
-
-// Add system property to disable macOS DNS resolver for Netty in tests
-tasks.withType(Test) {
-  systemProperty 'io.netty.resolver.dns.macos.disabled', 'true'
-  useJUnitPlatform()
-  testLogging {
-    events "passed", "skipped", "failed"
-    showStandardStreams = true // To see System.out/err from tests
-  }
-  def nativeLibDir = file("src/main/rust/rln_bridge/target/release").absolutePath
-  systemProperty "java.library.path", nativeLibDir
-}
-
-sourceSets {
-  main {
-    java {
-      srcDir 'build/generated/source/proto/main/grpc'
-      srcDir 'build/generated/source/proto/main/java'
-    }
-  }
 }
 
 apply from: rootProject.file("gradle/dist.gradle")
