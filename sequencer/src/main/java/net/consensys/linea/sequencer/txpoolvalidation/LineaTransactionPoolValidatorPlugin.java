@@ -30,6 +30,7 @@ import com.google.auto.service.AutoService;
 import lombok.extern.slf4j.Slf4j;
 import net.consensys.linea.AbstractLineaRequiredPlugin;
 import net.consensys.linea.config.LineaRejectedTxReportingConfiguration;
+import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.jsonrpc.JsonRpcManager;
 import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
 import net.consensys.linea.sequencer.txpoolvalidation.metrics.TransactionPoolProfitabilityMetrics;
@@ -54,6 +55,7 @@ public class LineaTransactionPoolValidatorPlugin extends AbstractLineaRequiredPl
   private TransactionPoolValidatorService transactionPoolValidatorService;
   private TransactionSimulationService transactionSimulationService;
   private Optional<JsonRpcManager> rejectedTxJsonRpcManager = Optional.empty();
+  private LineaRlnValidatorConfiguration rlnValidatorConfiguration;
 
   @Override
   public void doRegister(final ServiceManager serviceManager) {
@@ -84,6 +86,8 @@ public class LineaTransactionPoolValidatorPlugin extends AbstractLineaRequiredPl
       throw new IllegalArgumentException("L1L2 bridge settings have not been defined.");
     }
 
+    this.rlnValidatorConfiguration = rlnValidatorConfiguration();
+
     try (Stream<String> lines =
         Files.lines(
             Path.of(new File(transactionPoolValidatorConfiguration().denyListPath()).toURI()))) {
@@ -113,7 +117,8 @@ public class LineaTransactionPoolValidatorPlugin extends AbstractLineaRequiredPl
               deniedAddresses,
               createLimitModules(tracerConfiguration()),
               l1L2BridgeSharedConfiguration(),
-              rejectedTxJsonRpcManager));
+              rejectedTxJsonRpcManager,
+              rlnValidatorConfiguration));
 
       if (metricCategoryRegistry.isMetricCategoryEnabled(TX_POOL_PROFITABILITY)) {
         final var besuEventsService =

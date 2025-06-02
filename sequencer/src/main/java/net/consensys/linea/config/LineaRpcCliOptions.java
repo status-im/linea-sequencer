@@ -33,6 +33,17 @@ public class LineaRpcCliOptions implements LineaCliOptions {
   private static final BigDecimal DEFAULT_ESTIMATE_GAS_COMPATIBILITY_MODE_MULTIPLIER =
       BigDecimal.valueOf(1.2);
 
+  // CLI options for gasless features 
+  private static final String RPC_GASLESS_ENABLED = "--plugin-linea-rpc-gasless-enabled";
+  private static final boolean DEFAULT_RPC_GASLESS_ENABLED = false;
+
+  private static final String RPC_PREMIUM_GAS_MULTIPLIER = "--plugin-linea-rpc-premium-gas-multiplier";
+  private static final double DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER = 1.5; // Example default
+
+  private static final String RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS =
+      "--plugin-linea-rpc-allow-zero-gas-estimation-gasless";
+  private static final boolean DEFAULT_RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS = false;
+
   @CommandLine.Option(
       names = {ESTIMATE_GAS_COMPATIBILITY_MODE_ENABLED},
       paramLabel = "<BOOLEAN>",
@@ -48,6 +59,27 @@ public class LineaRpcCliOptions implements LineaCliOptions {
           "Set to multiplier to apply to the min priority fee per gas when the compatibility mode is enabled (default: ${DEFAULT-VALUE})")
   private BigDecimal estimateGasCompatibilityMultiplier =
       DEFAULT_ESTIMATE_GAS_COMPATIBILITY_MODE_MULTIPLIER;
+
+  @CommandLine.Option(
+      names = {RPC_GASLESS_ENABLED},
+      paramLabel = "<BOOLEAN>",
+      description =
+          "Enable gasless transaction features in RPC methods like linea_estimateGas (default: ${DEFAULT-VALUE})")
+  private boolean gaslessTransactionsEnabled = DEFAULT_RPC_GASLESS_ENABLED;
+
+  @CommandLine.Option(
+      names = {RPC_PREMIUM_GAS_MULTIPLIER},
+      paramLabel = "<DOUBLE>",
+      description =
+          "Multiplier for calculating premium gas price in estimateGas for denied users (default: ${DEFAULT-VALUE})")
+  private double premiumGasMultiplier = DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER;
+
+  @CommandLine.Option(
+      names = {RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS},
+      paramLabel = "<BOOLEAN>",
+      description =
+          "Allow linea_estimateGas to return 0 for gasless transactions if user is not on deny list (default: ${DEFAULT-VALUE})")
+  private boolean allowZeroGasEstimationForGasless = DEFAULT_RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS;
 
   private LineaRpcCliOptions() {}
 
@@ -70,20 +102,37 @@ public class LineaRpcCliOptions implements LineaCliOptions {
     final LineaRpcCliOptions options = create();
     options.estimateGasCompatibilityModeEnabled = config.estimateGasCompatibilityModeEnabled();
     options.estimateGasCompatibilityMultiplier = config.estimateGasCompatibilityMultiplier();
+    options.gaslessTransactionsEnabled = config.gaslessTransactionsEnabled();
+    options.premiumGasMultiplier = config.premiumGasMultiplier();
+    options.allowZeroGasEstimationForGasless = config.allowZeroGasEstimationForGasless();
     return options;
   }
 
   /**
-   * To domain object Linea factory configuration.
+   * Converts CLI options to LineaRpcConfiguration, requiring shared gasless config.
    *
-   * @return the Linea factory configuration
+   * @param sharedConfig The shared configuration for gasless features.
+   * @return The LineaRpcConfiguration domain object.
    */
-  @Override
-  public LineaRpcConfiguration toDomainObject() {
+  public LineaRpcConfiguration toDomainObject(LineaSharedGaslessConfiguration sharedConfig) {
     return LineaRpcConfiguration.builder()
         .estimateGasCompatibilityModeEnabled(estimateGasCompatibilityModeEnabled)
         .estimateGasCompatibilityMultiplier(estimateGasCompatibilityMultiplier)
+        .gaslessTransactionsEnabled(gaslessTransactionsEnabled)
+        .premiumGasMultiplier(premiumGasMultiplier)
+        .allowZeroGasEstimationForGasless(allowZeroGasEstimationForGasless)
+        .sharedGaslessConfig(sharedConfig) // Inject the shared config
         .build();
+  }
+
+  /**
+   * This version of toDomainObject is not supported for LineaRpcCliOptions as it requires
+   * LineaSharedGaslessConfiguration to be fully constructed.
+   */
+  @Override
+  public LineaRpcConfiguration toDomainObject() {
+    throw new UnsupportedOperationException(
+        "LineaRpcCliOptions requires LineaSharedGaslessConfiguration. Call toDomainObject(LineaSharedGaslessConfiguration sharedConfig) instead.");
   }
 
   @Override
@@ -91,6 +140,9 @@ public class LineaRpcCliOptions implements LineaCliOptions {
     return MoreObjects.toStringHelper(this)
         .add(ESTIMATE_GAS_COMPATIBILITY_MODE_ENABLED, estimateGasCompatibilityModeEnabled)
         .add(ESTIMATE_GAS_COMPATIBILITY_MODE_MULTIPLIER, estimateGasCompatibilityMultiplier)
+        .add(RPC_GASLESS_ENABLED, gaslessTransactionsEnabled)
+        .add(RPC_PREMIUM_GAS_MULTIPLIER, premiumGasMultiplier)
+        .add(RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS, allowZeroGasEstimationForGasless)
         .toString();
   }
 }

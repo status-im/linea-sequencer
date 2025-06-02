@@ -1,0 +1,28 @@
+syntax = "proto3";
+
+package net.consensys.linea.rln.proofs.grpc;
+
+option java_package = "net.consensys.linea.rln.proofs.grpc";
+option java_multiple_files = true;
+
+// Message structure for an RLN proof and its associated public inputs
+message ProofMessage {
+  string tx_hash = 1;         // Transaction hash this proof is for
+  string proof_bytes_hex = 2; // The RLN proof itself, hex encoded
+  string share_x_hex = 3;     // Public input: x-coordinate of the secret share, hex encoded
+  string share_y_hex = 4;     // Public input: y-coordinate of the secret share, hex encoded
+  string epoch_hex = 5;       // Public input: epoch identifier, hex encoded
+  string root_hex = 6;        // Public input: Merkle tree root, hex encoded
+  string nullifier_hex = 7;   // Public input: nullifier, hex encoded
+}
+
+// Request message for subscribing to the proof stream
+message StreamProofsRequest {
+  string client_id = 1; // Identifier for the client subscribing to the stream
+}
+
+// Service definition for streaming RLN proofs
+service RlnProofService {
+  // Server-streaming RPC for receiving RLN proofs as they become available
+  rpc StreamProofs(StreamProofsRequest) returns (stream ProofMessage);
+} 
