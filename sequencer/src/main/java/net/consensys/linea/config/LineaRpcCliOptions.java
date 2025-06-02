@@ -33,15 +33,15 @@ public class LineaRpcCliOptions implements LineaCliOptions {
   private static final BigDecimal DEFAULT_ESTIMATE_GAS_COMPATIBILITY_MODE_MULTIPLIER =
       BigDecimal.valueOf(1.2);
 
-  // New CLI options for gasless features
-  private static final String RPC_GASLESS_ENABLED = "--linea-rpc-gasless-enabled";
+  // CLI options for gasless features 
+  private static final String RPC_GASLESS_ENABLED = "--plugin-linea-rpc-gasless-enabled";
   private static final boolean DEFAULT_RPC_GASLESS_ENABLED = false;
 
-  private static final String RPC_PREMIUM_GAS_MULTIPLIER = "--linea-rpc-premium-gas-multiplier";
+  private static final String RPC_PREMIUM_GAS_MULTIPLIER = "--plugin-linea-rpc-premium-gas-multiplier";
   private static final double DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER = 1.5; // Example default
 
   private static final String RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS =
-      "--linea-rpc-allow-zero-gas-estimation-gasless";
+      "--plugin-linea-rpc-allow-zero-gas-estimation-gasless";
   private static final boolean DEFAULT_RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS = false;
 
   @CommandLine.Option(
