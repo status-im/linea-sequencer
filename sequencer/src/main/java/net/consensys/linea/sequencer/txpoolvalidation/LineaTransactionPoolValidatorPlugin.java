@@ -82,6 +82,8 @@ public class LineaTransactionPoolValidatorPlugin extends AbstractLineaRequiredPl
 
   @Override
   public void doStart() {
+    log.info("🚀 CUSTOM LINEA CODE IS RUNNING - LineaTransactionPoolValidatorPlugin starting up! 🚀");
+    
     if (l1L2BridgeSharedConfiguration().equals(LineaL1L2BridgeSharedConfiguration.TEST_DEFAULT)) {
       throw new IllegalArgumentException("L1L2 bridge settings have not been defined.");
     }

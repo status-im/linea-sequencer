@@ -51,6 +51,7 @@ import net.consensys.linea.sequencer.modulelimit.ModuleLimitsValidationResult;
 import net.consensys.linea.sequencer.modulelimit.ModuleLineCountValidator;
 import net.consensys.linea.zktracer.ZkTracer;
 import org.apache.tuweni.bytes.Bytes;
+import org.apache.tuweni.units.bigints.UInt256;
 import org.bouncycastle.asn1.sec.SECNamedCurves;
 import org.bouncycastle.asn1.x9.X9ECParameters;
 import org.bouncycastle.crypto.params.ECDomainParameters;
@@ -106,6 +107,7 @@ public class LineaEstimateGas {
   private TransactionProfitabilityCalculator txProfitabilityCalculator;
   private LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration;
   private ModuleLineCountValidator moduleLineCountValidator;
+  private UInt256 maxTxGasLimit;
 
   // New fields for gasless/deny list features
   private boolean gaslessTransactionsEnabled;
@@ -242,8 +244,8 @@ public class LineaEstimateGas {
       final var minGasPrice = besuConfiguration.getMinGasPrice();
 
       // --- Linea Gasless Logic Start ---
-      if (gaslessTransactionsEnabled && callParameters.getFrom() != null) {
-        Address sender = callParameters.getFrom();
+      if (gaslessTransactionsEnabled && callParameters.getSender().isPresent()) {
+        Address sender = callParameters.getSender().get();
         boolean isOnDenyList = denyListPathOpt.isPresent() && denyListCache.contains(sender);
 
         if (isOnDenyList) {
@@ -254,11 +256,17 @@ public class LineaEstimateGas {
               premiumGasMultiplier);
           // Proceed to estimate gas, then multiply.
           final long originalGasEstimate =
-              estimateOriginalGas(callParameters, maybeStateOverrides, minGasPrice, logId);
+              getGasEstimation(callParameters, maybeStateOverrides, logId);
           final long premiumGasEstimate = (long) (originalGasEstimate * premiumGasMultiplier);
 
-          // Fees are determined by the market, but the gas limit is inflated.
-          final Wei baseFee = blockchainService.getNextBlockBaseFee().orElse(Wei.ZERO);
+          final Wei baseFee =
+              blockchainService
+                  .getNextBlockBaseFee()
+                  .orElseThrow(
+                      () ->
+                          new PluginRpcEndpointException(
+                              RpcErrorType.INVALID_REQUEST, "Not on a baseFee market"));
+
           final Transaction tempTxForFeeEstimation =
               createTransactionForSimulation(callParameters, premiumGasEstimate, baseFee, logId);
           final Wei estimatedPriorityFee =
@@ -290,9 +298,6 @@ public class LineaEstimateGas {
       }
       // --- Linea Gasless Logic End ---
 
-      // Original estimation logic (also used as fallback or if gasless mode disabled)
-      final long estimatedGasUsed =
-          estimateOriginalGas(callParameters, maybeStateOverrides, minGasPrice, logId);
       final Wei baseFee =
           blockchainService
               .getNextBlockBaseFee()
@@ -300,8 +305,21 @@ public class LineaEstimateGas {
                   () ->
                       new PluginRpcEndpointException(
                           RpcErrorType.INVALID_REQUEST, "Not on a baseFee market"));
-      final Transaction transaction =
-          createTransactionForSimulation(callParameters, estimatedGasUsed, baseFee, logId);
+
+      log.debug("[{}] Parsed call parameters: {}", logId, callParameters);
+      final long gasEstimation = getGasEstimation(callParameters, maybeStateOverrides, logId);
+
+      final var transaction =
+          createTransactionForSimulation(callParameters, gasEstimation, baseFee, logId);
+      log.atDebug()
+          .setMessage("[{}] Transaction: {}; Gas estimation {}")
+          .addArgument(logId)
+          .addArgument(transaction::toTraceLog)
+          .addArgument(gasEstimation)
+          .log();
+
+      validateLineCounts(maybeStateOverrides, transaction, logId);
+
       final Wei estimatedPriorityFee =
           getEstimatedPriorityFee(transaction, baseFee, minGasPrice, gasEstimation);
 
@@ -322,52 +340,14 @@ public class LineaEstimateGas {
     }
   }
 
-  private long estimateOriginalGas(
-      final JsonCallParameter callParameters,
+  private Long getGasEstimation(
+      final CallParameter callParameter,
       final Optional<StateOverrideMap> maybeStateOverrides,
-      final Wei minGasPrice,
       final long logId) {
-    final long gasLimitUpperBound = calculateGasLimitUpperBound(callParameters, logId);
-    final Wei baseFee = blockchainService.getNextBlockBaseFee().orElse(Wei.ZERO);
-    final Transaction transaction =
-
-    return estimateGasUsed(callParameters, maybeStateOverrides, transaction, baseFee, logId);
-  }
-
-  private long calculateGasLimitUpperBound(
-      final JsonCallParameter callParameters, final long logId) {
-    if (callParameters.getFrom() != null) {
-      final var sender = callParameters.getFrom();
-      final var maxGasPrice = calculateTxMaxGasPrice(callParameters);
-      log.atTrace()
-          .setMessage("[{}] Calculated max gas price {}")
-          .addArgument(logId)
-          .addArgument(maxGasPrice)
-          .log();
-      if (maxGasPrice != null) {
-        final Wei balance = getSenderBalance(sender, logId);
-        if (balance.greaterThan(Wei.ZERO)) {
-          final var value = callParameters.getValue();
-          final var balanceForGas = value == null ? balance : balance.subtract(value);
-          final var gasLimitForBalance = balanceForGas.divide(maxGasPrice).toUInt256();
-          if (gasLimitForBalance.lessThan(maxTxGasLimit)) {
-            final var gasLimitUpperBound = gasLimitForBalance.toLong();
-            log.atTrace()
-                .setMessage(
-                    "[{}] Calculated gasLimitUpperBound {}; gasLimitForBalance {}, balance {}, value {}, balanceForGas {}, maxGasPrice {}")
-                .addArgument(logId)
-                .addArgument(gasLimitUpperBound)
-                .addArgument(gasLimitForBalance::toDecimalString)
-                .addArgument(balance::toHumanReadableString)
-                .addArgument(value::toHumanReadableString)
-                .addArgument(balanceForGas::toHumanReadableString)
-                .addArgument(maxGasPrice::toHumanReadableString)
-                .log();
-            return gasLimitUpperBound;
-          }
-        }
-      }
-    }
+    final var params =
+        maybeStateOverrides.isPresent()
+            ? new Object[] {callParameter, "pending", maybeStateOverrides.get()}
+            : new Object[] {callParameter, "pending"};
 
     final var resp = rpcEndpointService.call("eth_estimateGas", params);
     if (!resp.getType().equals(RpcResponseType.SUCCESS)) {
@@ -385,6 +365,9 @@ public class LineaEstimateGas {
         .log();
     return gasEstimation;
   }
+
+
+
   private Wei getEstimatedPriorityFee(
       final Transaction transaction,
       final Wei baseFee,
@@ -631,45 +614,7 @@ public class LineaEstimateGas {
     }
   }
 
-  private static class EstimateGasOperationTracer implements OperationTracer {
 
-    private int maxDepth = 0;
-
-    private long sStoreStipendNeeded = 0L;
-
-    /** Default constructor. */
-    public EstimateGasOperationTracer() {}
-
-    @Override
-    public void tracePostExecution(
-        final MessageFrame frame, final Operation.OperationResult operationResult) {
-      if (frame.getCurrentOperation() instanceof SStoreOperation sStoreOperation
-          && sStoreStipendNeeded == 0L) {
-        sStoreStipendNeeded = sStoreOperation.getMinimumGasRemaining();
-      }
-      if (maxDepth < frame.getDepth()) {
-        maxDepth = frame.getDepth();
-      }
-    }
-
-    /**
-     * Gets max depth.
-     *
-     * @return the max depth
-     */
-    public int getMaxDepth() {
-      return maxDepth;
-    }
-
-    /**
-     * Gets stipend needed.
-     *
-     * @return the stipend needed
-     */
-    public long getStipendNeeded() {
-      return sStoreStipendNeeded;
-    }
-  }
 
   // Method to stop the scheduler when the plugin stops (needs to be called from plugin's stop
   // lifecycle)

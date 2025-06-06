@@ -56,24 +56,24 @@ class LineaRlnValidatorCliOptionsTest {
   void toDomainObject_withSpecificCliOptions_shouldReturnMatchingConfiguration() {
     LineaRlnValidatorCliOptions cliOptions = LineaRlnValidatorCliOptions.create();
     String[] args = {
-      "--linea-rln-validation-enabled=false",
-      "--linea-rln-verifying-key-path=/custom/vk.key",
-      "--linea-rln-proof-service-host=testhost",
-      "--linea-rln-proof-service-port=9999",
-      "--linea-rln-proof-service-use-tls=true",
-      "--linea-rln-proof-cache-max-size=500",
-      "--linea-rln-proof-cache-expiry-seconds=60",
-      "--linea-rln-proof-stream-retries=10",
-      "--linea-rln-proof-stream-retry-interval-ms=10000",
-      "--linea-rln-proof-local-wait-timeout-ms=200",
-      "--linea-rln-karma-service-url=http://custom.karma/api",
-      "--linea-rln-default-epoch-for-quota=BLOCK_NUMBER_100",
-      "--linea-rln-jni-lib-path=/custom/lib/rln.so"
+      "--plugin-linea-rln-validation-enabled=false",
+      "--plugin-linea-rln-verifying-key-path=/custom/vk.key",
+      "--plugin-linea-rln-proof-service-host=testhost",
+      "--plugin-linea-rln-proof-service-port=9999",
+      "--plugin-linea-rln-proof-service-use-tls=true",
+      "--plugin-linea-rln-proof-cache-max-size=500",
+      "--plugin-linea-rln-proof-cache-expiry-seconds=60",
+      "--plugin-linea-rln-proof-stream-retries=10",
+      "--plugin-linea-rln-proof-stream-retry-interval-ms=10000",
+      "--plugin-linea-rln-proof-local-wait-timeout-ms=200",
+      "--plugin-linea-rln-karma-service-url=http://custom.karma/api",
+      "--plugin-linea-rln-default-epoch-for-quota=BLOCK_NUMBER_100",
+      "--plugin-linea-rln-jni-lib-path=/custom/lib/rln.so"
       // Shared options Temporarily Removed for diagnostics
-      // "--linea-shared-deny-list-path=/custom/deny.txt",
-      // "--linea-shared-deny-list-refresh-seconds=120",
-      // "--linea-shared-deny-list-entry-max-age-minutes=30",
-      // "--linea-shared-premium-gas-price-threshold-gwei=5000"
+      // "--plugin-linea-shared-deny-list-path=/custom/deny.txt",
+      // "--plugin-linea-shared-deny-list-refresh-seconds=120",
+      // "--plugin-linea-shared-deny-list-entry-max-age-minutes=30",
+      // "--plugin-linea-shared-premium-gas-price-threshold-gwei=5000"
     };
     new CommandLine(cliOptions).parseArgs(args);
 

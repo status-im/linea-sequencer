@@ -55,9 +55,9 @@ class LineaRpcCliOptionsTest {
     String[] args = {
       "--plugin-linea-estimate-gas-compatibility-mode-enabled=true",
       "--plugin-linea-estimate-gas-compatibility-mode-multiplier=1.5",
-      "--linea-rpc-gasless-enabled=true",
-      "--linea-rpc-premium-gas-multiplier=2.5",
-      "--linea-rpc-allow-zero-gas-estimation-gasless=true"
+      "--plugin-linea-rpc-gasless-enabled=true",
+      "--plugin-linea-rpc-premium-gas-multiplier=2.5",
+      "--plugin-linea-rpc-allow-zero-gas-estimation-gasless=true"
     };
     new CommandLine(cliOptions).parseArgs(args);
 
