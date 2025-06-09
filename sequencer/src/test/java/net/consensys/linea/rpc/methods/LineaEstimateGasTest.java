@@ -1,3 +1,17 @@
+/*
+ * Copyright Consensys Software Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package net.consensys.linea.rpc.methods;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -10,11 +24,11 @@ import java.nio.file.Path;
 import java.util.Map;
 import java.util.Optional;
 
-import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
 import net.consensys.linea.config.LineaProfitabilityConfiguration;
 import net.consensys.linea.config.LineaRpcConfiguration;
 import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.config.LineaTransactionPoolValidatorConfiguration;
+import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
 import org.hyperledger.besu.datatypes.Address;
@@ -34,9 +48,9 @@ import org.mockito.quality.Strictness;
 
 /**
  * Unit tests for LineaEstimateGas gasless functionality.
- * 
- * These tests focus on the core gasless logic without complex RPC mocking.
- * They verify the configuration and initialization behavior.
+ *
+ * <p>These tests focus on the core gasless logic without complex RPC mocking. They verify the
+ * configuration and initialization behavior.
  */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
@@ -61,17 +75,17 @@ class LineaEstimateGasTest {
   @BeforeEach
   void setUp() throws IOException {
     denyListFile = tempDir.resolve("deny_list.txt");
-    
+
     // Setup default mocks
     when(besuConfiguration.getMinGasPrice()).thenReturn(Wei.of(1_000_000_000L));
     when(blockchainService.getNextBlockBaseFee()).thenReturn(Optional.of(Wei.of(1_000_000_000L)));
-    
+
     // Setup gasless configuration
     when(sharedGaslessConfig.denyListPath()).thenReturn(denyListFile.toString());
     when(sharedGaslessConfig.denyListRefreshSeconds()).thenReturn(60L);
     when(sharedGaslessConfig.premiumGasPriceThresholdGWei()).thenReturn(10L); // 10 GWei
     when(sharedGaslessConfig.denyListEntryMaxAgeMinutes()).thenReturn(60L);
-    
+
     when(rpcConfiguration.gaslessTransactionsEnabled()).thenReturn(true);
     when(rpcConfiguration.sharedGaslessConfig()).thenReturn(sharedGaslessConfig);
     when(rpcConfiguration.premiumGasMultiplier()).thenReturn(1.5);
@@ -80,22 +94,19 @@ class LineaEstimateGasTest {
     when(rpcConfiguration.karmaServicePort()).thenReturn(7777);
     when(rpcConfiguration.karmaServiceUseTls()).thenReturn(false);
     when(rpcConfiguration.karmaServiceTimeoutMs()).thenReturn(5000L);
-    
+
     when(txValidatorConf.maxTxGasLimit()).thenReturn(30_000_000);
-    
+
     // Create shared services for testing
     denyListManager = new DenyListManager("TestService", denyListFile.toString(), 60L, 0L);
     // Note: KarmaServiceClient would normally be initialized with real gRPC config,
     // but for unit tests we can pass null since we're testing configuration logic
     karmaServiceClient = null;
-    
+
     // Create LineaEstimateGas instance
-    lineaEstimateGas = new LineaEstimateGas(
-        besuConfiguration,
-        transactionSimulationService,
-        blockchainService,
-        rpcEndpointService
-    );
+    lineaEstimateGas =
+        new LineaEstimateGas(
+            besuConfiguration, transactionSimulationService, blockchainService, rpcEndpointService);
   }
 
   @Test
@@ -108,9 +119,8 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // Then: Should initialize without errors
     assertNotNull(lineaEstimateGas);
     assertEquals("linea", lineaEstimateGas.getNamespace());
@@ -121,7 +131,7 @@ class LineaEstimateGasTest {
   void testGaslessDisabled_shouldInitializeCorrectly() {
     // Given: Gasless functionality is disabled
     when(rpcConfiguration.gaslessTransactionsEnabled()).thenReturn(false);
-    
+
     // When: Initialize with gasless disabled
     lineaEstimateGas.init(
         rpcConfiguration,
@@ -130,9 +140,8 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // Then: Should initialize without errors
     assertNotNull(lineaEstimateGas);
     assertEquals("linea", lineaEstimateGas.getNamespace());
@@ -143,7 +152,7 @@ class LineaEstimateGasTest {
   void testDenyListFileCreation_shouldCreateFileWhenNeeded() throws IOException {
     // Given: Deny list file doesn't exist initially
     assertFalse(Files.exists(denyListFile));
-    
+
     // When: Initialize gasless functionality
     lineaEstimateGas.init(
         rpcConfiguration,
@@ -152,9 +161,8 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // Then: Should handle missing file gracefully
     assertNotNull(lineaEstimateGas);
   }
@@ -165,7 +173,7 @@ class LineaEstimateGasTest {
     Address testAddress = Address.fromHexString("0x1234567890123456789012345678901234567890");
     String content = testAddress.toHexString().toLowerCase() + ",2024-01-01T12:00:00Z";
     Files.writeString(denyListFile, content, StandardCharsets.UTF_8);
-    
+
     // When: Initialize gasless functionality
     lineaEstimateGas.init(
         rpcConfiguration,
@@ -174,9 +182,8 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // Then: Should initialize without errors
     assertNotNull(lineaEstimateGas);
   }
@@ -185,7 +192,7 @@ class LineaEstimateGasTest {
   void testNullSharedGaslessConfig_shouldHandleGracefully() {
     // Given: Null shared gasless config
     when(rpcConfiguration.sharedGaslessConfig()).thenReturn(null);
-    
+
     // When: Initialize with null config
     lineaEstimateGas.init(
         rpcConfiguration,
@@ -194,9 +201,8 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // Then: Should initialize without errors (with warnings logged)
     assertNotNull(lineaEstimateGas);
   }
@@ -211,12 +217,11 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // When: Stop the service
     lineaEstimateGas.stop();
-    
+
     // Then: Should complete without errors
     assertNotNull(lineaEstimateGas);
   }
@@ -225,7 +230,7 @@ class LineaEstimateGasTest {
   void testPremiumGasMultiplier_shouldBeConfigurable() {
     // Given: Custom premium gas multiplier
     when(rpcConfiguration.premiumGasMultiplier()).thenReturn(2.0);
-    
+
     // When: Initialize with custom multiplier
     lineaEstimateGas.init(
         rpcConfiguration,
@@ -234,9 +239,8 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // Then: Should initialize without errors
     assertNotNull(lineaEstimateGas);
   }
@@ -245,7 +249,7 @@ class LineaEstimateGasTest {
   void testZeroGasEstimationFlag_shouldBeConfigurable() {
     // Given: Zero gas estimation disabled
     when(rpcConfiguration.allowZeroGasEstimationForGasless()).thenReturn(false);
-    
+
     // When: Initialize with zero gas disabled
     lineaEstimateGas.init(
         rpcConfiguration,
@@ -254,10 +258,9 @@ class LineaEstimateGasTest {
         Map.of(),
         l1L2BridgeConfiguration,
         denyListManager,
-        karmaServiceClient
-    );
-    
+        karmaServiceClient);
+
     // Then: Should initialize without errors
     assertNotNull(lineaEstimateGas);
   }
-} 
+}

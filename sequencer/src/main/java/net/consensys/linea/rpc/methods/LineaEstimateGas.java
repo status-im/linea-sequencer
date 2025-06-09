@@ -20,22 +20,11 @@ import static net.consensys.linea.sequencer.modulelimit.ModuleLineCountValidator
 import static net.consensys.linea.zktracer.Fork.LONDON;
 import static org.hyperledger.besu.ethereum.api.jsonrpc.internal.results.Quantity.create;
 
-import java.io.BufferedReader;
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.math.RoundingMode;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -49,6 +38,9 @@ import net.consensys.linea.config.LineaTransactionPoolValidatorConfiguration;
 import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
 import net.consensys.linea.sequencer.modulelimit.ModuleLimitsValidationResult;
 import net.consensys.linea.sequencer.modulelimit.ModuleLineCountValidator;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient.KarmaInfo;
 import net.consensys.linea.zktracer.ZkTracer;
 import org.apache.tuweni.bytes.Bytes;
 import org.apache.tuweni.units.bigints.UInt256;
@@ -75,11 +67,6 @@ import org.hyperledger.besu.plugin.services.exception.PluginRpcEndpointException
 import org.hyperledger.besu.plugin.services.rpc.PluginRpcRequest;
 import org.hyperledger.besu.plugin.services.rpc.RpcMethodError;
 import org.hyperledger.besu.plugin.services.rpc.RpcResponseType;
-
-// Add imports for shared services
-import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
-import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient.KarmaInfo;
-import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
 
 @Slf4j
 public class LineaEstimateGas {
@@ -156,29 +143,31 @@ public class LineaEstimateGas {
     if (this.gaslessTransactionsEnabled) {
       this.sharedGaslessConfig = rpcConfig.sharedGaslessConfig();
       if (this.sharedGaslessConfig == null) {
-        log.warn("LineaRpcConfiguration provided null sharedGaslessConfig while gasless transactions are enabled.");
+        log.warn(
+            "LineaRpcConfiguration provided null sharedGaslessConfig while gasless transactions are enabled.");
       }
       this.premiumGasMultiplier = rpcConfig.premiumGasMultiplier();
       this.allowZeroGasEstimationForGasless = rpcConfig.allowZeroGasEstimationForGasless();
-      
+
       // Inject shared services
       this.denyListManager = denyListManager;
       this.karmaServiceClient = karmaServiceClient;
-      
+
       if (this.denyListManager == null) {
-        log.warn("DenyListManager not provided while gasless transactions are enabled. Deny list checks will be skipped.");
+        log.warn(
+            "DenyListManager not provided while gasless transactions are enabled. Deny list checks will be skipped.");
       }
       if (this.karmaServiceClient == null) {
-        log.warn("KarmaServiceClient not provided while gasless transactions are enabled. Karma checks will be skipped.");
+        log.warn(
+            "KarmaServiceClient not provided while gasless transactions are enabled. Karma checks will be skipped.");
       }
-      
-      log.info("Gasless transaction features for linea_estimateGas are ENABLED with shared services.");
+
+      log.info(
+          "Gasless transaction features for linea_estimateGas are ENABLED with shared services.");
     } else {
       log.info("Gasless transaction features for linea_estimateGas are DISABLED.");
     }
   }
-
-
 
   public String getNamespace() {
     return "linea";
@@ -207,7 +196,7 @@ public class LineaEstimateGas {
       // --- Linea Gasless Logic Start ---
       if (gaslessTransactionsEnabled && callParameters.getSender().isPresent()) {
         Address sender = callParameters.getSender().get();
-        
+
         // Check if sender is on deny list (read-only operation)
         boolean isOnDenyList = denyListManager != null && denyListManager.isDenied(sender);
 
@@ -248,11 +237,11 @@ public class LineaEstimateGas {
 
         // Not on deny list - check if user has karma balance for gasless eligibility
         Optional<KarmaInfo> karmaInfoOpt = fetchKarmaInfoFromService(sender);
-        
+
         if (karmaInfoOpt.isPresent()) {
           KarmaInfo karmaInfo = karmaInfoOpt.get();
           boolean hasKarma = karmaInfo.karmaBalance() > 0;
-          
+
           log.debug(
               "[{}] Karma info for sender {}: Tier={}, KarmaBalance={}, HasKarma={}",
               logId,
@@ -277,7 +266,8 @@ public class LineaEstimateGas {
               sender.toHexString(),
               karmaInfo.karmaBalance());
         } else {
-          // Karma service unavailable or user not found - assume no karma, proceed to normal estimation
+          // Karma service unavailable or user not found - assume no karma, proceed to normal
+          // estimation
           log.debug(
               "[{}] Karma service unavailable or user {} not found. Proceeding with standard gas estimation.",
               logId,
@@ -608,15 +598,15 @@ public class LineaEstimateGas {
     log.info("LineaEstimateGas stopped. Shared services are managed externally.");
   }
 
-
-
   /**
-   * Fetches karma information for a user via shared Karma Service client.
-   * Used only to check if user has karma balance > 0 for gasless eligibility.
+   * Fetches karma information for a user via shared Karma Service client. Used only to check if
+   * user has karma balance > 0 for gasless eligibility.
    */
   private Optional<KarmaInfo> fetchKarmaInfoFromService(Address userAddress) {
     if (karmaServiceClient == null || !karmaServiceClient.isAvailable()) {
-      log.debug("Karma service client not available. Cannot fetch karma info for {}", userAddress.toHexString());
+      log.debug(
+          "Karma service client not available. Cannot fetch karma info for {}",
+          userAddress.toHexString());
       return Optional.empty();
     }
 

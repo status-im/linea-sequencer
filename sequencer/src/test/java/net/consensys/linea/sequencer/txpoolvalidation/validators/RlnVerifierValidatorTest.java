@@ -1,3 +1,17 @@
+/*
+ * Copyright Consensys Software Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package net.consensys.linea.sequencer.txpoolvalidation.validators;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -24,8 +38,8 @@ import net.consensys.linea.rln.jni.RlnBridge;
 import net.consensys.linea.rln.proofs.grpc.ProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
-import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Transaction;
@@ -244,22 +258,32 @@ class RlnVerifierValidatorTest {
     LOG.info("In-process gRPC channel created for server name: {}", serverName);
 
     // Create DenyListManager for testing - use same expiry as the mock config
-    denyListManager = new DenyListManager("TestService", denyListFile.toString(), 
-        LineaSharedGaslessConfiguration.DEFAULT_DENY_LIST_ENTRY_MAX_AGE_MINUTES, 0L);
+    denyListManager =
+        new DenyListManager(
+            "TestService",
+            denyListFile.toString(),
+            LineaSharedGaslessConfiguration.DEFAULT_DENY_LIST_ENTRY_MAX_AGE_MINUTES,
+            0L);
 
     // Create a mock karma service client for testing
     KarmaServiceClient mockKarmaServiceClient = mock(KarmaServiceClient.class);
     when(mockKarmaServiceClient.isAvailable()).thenReturn(true);
-    
+
     // Setup default karma info response (user has quota available)
-    KarmaServiceClient.KarmaInfo defaultKarmaInfo = new KarmaServiceClient.KarmaInfo(
-        "STANDARD", 5, 100, "T:2024-01-01T12", 1000L);
+    KarmaServiceClient.KarmaInfo defaultKarmaInfo =
+        new KarmaServiceClient.KarmaInfo("STANDARD", 5, 100, "T:2024-01-01T12", 1000L);
     when(mockKarmaServiceClient.fetchKarmaInfo(any(Address.class)))
         .thenReturn(Optional.of(defaultKarmaInfo));
 
     RlnVerifierValidator tempValidator = null;
     try {
-      tempValidator = new RlnVerifierValidator(rlnConfig, blockchainService, denyListManager, mockKarmaServiceClient, inProcessChannel);
+      tempValidator =
+          new RlnVerifierValidator(
+              rlnConfig,
+              blockchainService,
+              denyListManager,
+              mockKarmaServiceClient,
+              inProcessChannel);
     } catch (Throwable t) { // Catch Throwable to get all details
       LOG.error("Error during RlnVerifierValidator construction (direct catch)", t);
       if (t.getCause() != null) {
@@ -392,8 +416,16 @@ class RlnVerifierValidatorTest {
     validator.loadDenyListFromFileForTest();
 
     // Debug the state after loading
-    System.out.println("Non-expired address " + nonExpiredAddress + " is denied: " + validator.isDeniedForTest(nonExpiredAddress));
-    System.out.println("Expired address " + expiredAddress + " is denied: " + validator.isDeniedForTest(expiredAddress));
+    System.out.println(
+        "Non-expired address "
+            + nonExpiredAddress
+            + " is denied: "
+            + validator.isDeniedForTest(nonExpiredAddress));
+    System.out.println(
+        "Expired address "
+            + expiredAddress
+            + " is denied: "
+            + validator.isDeniedForTest(expiredAddress));
     System.out.println("Configured expiry minutes: " + configuredExpiryMinutes);
     System.out.println("Expired time was: " + expiredTime);
     System.out.println("Current time is: " + Instant.now());
@@ -461,8 +493,9 @@ class RlnVerifierValidatorTest {
         "RlnVerifierValidatorTest: Starting testValidateTransaction_withValidProof_JNI_Succeeds");
     assertNotNull(jniTestVerifyingKeyBytes, "JNI test verifying key bytes must be loaded.");
     assertNotNull(jniTestFirstValidProofEntry, "JNI test proof entry must be loaded.");
-    
-    // For this JNI test, we'll use the main validator but ensure karma service returns a valid response
+
+    // For this JNI test, we'll use the main validator but ensure karma service returns a valid
+    // response
     // The test should focus on proof verification, but we need karma service to not fail
 
     JSONObject proofEntry = jniTestFirstValidProofEntry;
@@ -532,25 +565,26 @@ class RlnVerifierValidatorTest {
             + "\n(To see validator's current epoch, you might need to log inside RlnVerifierValidator.getCurrentEpochIdentifier() or isProofValidBasedOnEpochAndNullifier)");
 
     // Note: Using main validator, no need to clean up separately
-    
+
     System.out.println(
         "RlnVerifierValidatorTest: Finished testValidateTransaction_withValidProof_JNI_Succeeds");
   }
 
   @Test
   void testValidateTransaction_userOnDenyList_withoutPremiumGas_shouldReject() {
-    System.out.println("RlnVerifierValidatorTest: Starting testValidateTransaction_userOnDenyList_withoutPremiumGas");
-    
+    System.out.println(
+        "RlnVerifierValidatorTest: Starting testValidateTransaction_userOnDenyList_withoutPremiumGas");
+
     // Debug validator state
     System.out.println("Validator is null: " + (validator == null));
     System.out.println("DenyListManager is null: " + (denyListManager == null));
-    
+
     assertNotNull(validator, "Validator should not be null");
     assertNotNull(denyListManager, "DenyListManager should not be null");
-    
+
     // Given: User is on deny list
     Address deniedUser = Address.fromHexString("0x1111111111111111111111111111111111111111");
-    
+
     // Debug: Try to access the validator's deny list manager
     try {
       validator.addToDenyListForTest(deniedUser, Instant.now());
@@ -559,215 +593,259 @@ class RlnVerifierValidatorTest {
       e.printStackTrace();
       throw e;
     }
-    
+
     // Verify user is actually on deny list
     assertTrue(validator.isDeniedForTest(deniedUser), "User should be on deny list before test");
-    
+
     Transaction mockTransaction = mock(Transaction.class);
     when(mockTransaction.getSender()).thenReturn(deniedUser);
     when(mockTransaction.getGasPrice())
         .thenAnswer(invocation -> Optional.of(Wei.of(1_000_000_000L))); // 1 GWei - below premium
     when(mockTransaction.getMaxFeePerGas()).thenReturn(Optional.empty());
-    when(mockTransaction.getHash()).thenReturn(org.hyperledger.besu.datatypes.Hash.fromHexString("0x1111111111111111111111111111111111111111111111111111111111111111"));
-    
+    when(mockTransaction.getHash())
+        .thenReturn(
+            org.hyperledger.besu.datatypes.Hash.fromHexString(
+                "0x1111111111111111111111111111111111111111111111111111111111111111"));
+
     // When: Validate transaction
     Optional<String> result = validator.validateTransaction(mockTransaction, false, false);
-    
+
     // Debug the result
     System.out.println("Result present: " + result.isPresent());
     if (result.isPresent()) {
       System.out.println("Result value: " + result.get());
     }
-    
+
     // Then: Should reject with deny list message
     assertTrue(result.isPresent(), "Transaction should be rejected");
     if (result.isPresent()) {
-      assertTrue(result.get().contains("deny list"), "Rejection should mention deny list, but got: " + result.get());
+      assertTrue(
+          result.get().contains("deny list"),
+          "Rejection should mention deny list, but got: " + result.get());
     }
-    
-    System.out.println("RlnVerifierValidatorTest: Finished testValidateTransaction_userOnDenyList_withoutPremiumGas");
+
+    System.out.println(
+        "RlnVerifierValidatorTest: Finished testValidateTransaction_userOnDenyList_withoutPremiumGas");
   }
 
   @Test
   void testValidateTransaction_userOnDenyList_withPremiumGas_shouldRemoveAndAllow() {
-    System.out.println("RlnVerifierValidatorTest: Starting testValidateTransaction_userOnDenyList_withPremiumGas");
-    
+    System.out.println(
+        "RlnVerifierValidatorTest: Starting testValidateTransaction_userOnDenyList_withPremiumGas");
+
     // Given: User is on deny list but pays premium gas
     Address premiumUser = Address.fromHexString("0x2222222222222222222222222222222222222222");
     validator.addToDenyListForTest(premiumUser, Instant.now());
-    
+
     // Use the threshold from configuration (already mocked in setUp)
     long premiumThreshold = 10_000_000_000L; // Same as the mock value in setUp
-    
+
     Transaction mockTransaction = mock(Transaction.class);
     when(mockTransaction.getSender()).thenReturn(premiumUser);
     when(mockTransaction.getGasPrice())
         .thenAnswer(invocation -> Optional.of(Wei.of(premiumThreshold + 1_000_000_000L)));
     when(mockTransaction.getMaxFeePerGas()).thenReturn(Optional.empty());
-    when(mockTransaction.getHash()).thenReturn(org.hyperledger.besu.datatypes.Hash.fromHexString("0x2222222222222222222222222222222222222222222222222222222222222222"));
-    
+    when(mockTransaction.getHash())
+        .thenReturn(
+            org.hyperledger.besu.datatypes.Hash.fromHexString(
+                "0x2222222222222222222222222222222222222222222222222222222222222222"));
+
     // When: Validate transaction (premium gas should remove from deny list immediately)
     Optional<String> result = validator.validateTransaction(mockTransaction, false, false);
-    
+
     // Then: Should be removed from deny list due to premium gas payment
-    assertFalse(validator.isDeniedForTest(premiumUser), "User should be removed from deny list after paying premium gas");
-    
-    System.out.println("RlnVerifierValidatorTest: Finished testValidateTransaction_userOnDenyList_withPremiumGas");
+    assertFalse(
+        validator.isDeniedForTest(premiumUser),
+        "User should be removed from deny list after paying premium gas");
+
+    System.out.println(
+        "RlnVerifierValidatorTest: Finished testValidateTransaction_userOnDenyList_withPremiumGas");
   }
 
   @Test
   void testValidateTransaction_noProofInCache_shouldReject() {
     System.out.println("RlnVerifierValidatorTest: Starting testValidateTransaction_noProofInCache");
-    
+
     // Given: Transaction with no proof in cache
     Address sender = Address.fromHexString("0x3333333333333333333333333333333333333333");
     Transaction mockTransaction = mock(Transaction.class);
     when(mockTransaction.getSender()).thenReturn(sender);
-    when(mockTransaction.getHash()).thenReturn(org.hyperledger.besu.datatypes.Hash.fromHexString("0x3333333333333333333333333333333333333333333333333333333333333333"));
+    when(mockTransaction.getHash())
+        .thenReturn(
+            org.hyperledger.besu.datatypes.Hash.fromHexString(
+                "0x3333333333333333333333333333333333333333333333333333333333333333"));
     when(mockTransaction.getGasPrice())
         .thenAnswer(invocation -> Optional.of(Wei.of(1_000_000_000L)));
     when(mockTransaction.getMaxFeePerGas()).thenReturn(Optional.empty());
-    
+
     // When: Validate transaction
     Optional<String> result = validator.validateTransaction(mockTransaction, false, false);
-    
+
     // Then: Should reject due to missing proof
     assertTrue(result.isPresent(), "Transaction should be rejected");
     assertTrue(result.get().contains("proof not found"), "Should mention missing proof");
-    
+
     System.out.println("RlnVerifierValidatorTest: Finished testValidateTransaction_noProofInCache");
   }
 
   @Test
   void testValidateTransaction_invalidProof_shouldReject() {
     System.out.println("RlnVerifierValidatorTest: Starting testValidateTransaction_invalidProof");
-    
+
     // Given: Transaction with invalid proof
     Address sender = Address.fromHexString("0x4444444444444444444444444444444444444444");
     String txHash = "0x4444444444444444444444444444444444444444444444444444444444444444";
-    
+
     Transaction mockTransaction = mock(Transaction.class);
     when(mockTransaction.getSender()).thenReturn(sender);
-    when(mockTransaction.getHash()).thenReturn(org.hyperledger.besu.datatypes.Hash.fromHexString(txHash));
+    when(mockTransaction.getHash())
+        .thenReturn(org.hyperledger.besu.datatypes.Hash.fromHexString(txHash));
     when(mockTransaction.getGasPrice())
         .thenAnswer(invocation -> Optional.of(Wei.of(1_000_000_000L)));
     when(mockTransaction.getMaxFeePerGas()).thenReturn(Optional.empty());
-    
+
     // Add invalid proof to cache
-    validator.addProofToCacheForTest(txHash, 
-        new RlnVerifierValidator.CachedProof("0xinvalidproof", "0xshareX", "0xshareY", "0xepoch", "0xroot", "0xnullifier", Instant.now()));
-    
+    validator.addProofToCacheForTest(
+        txHash,
+        new RlnVerifierValidator.CachedProof(
+            "0xinvalidproof",
+            "0xshareX",
+            "0xshareY",
+            "0xepoch",
+            "0xroot",
+            "0xnullifier",
+            Instant.now()));
+
     // Note: The proof verification will fail naturally since we're using a dummy proof
-    
+
     // When: Validate transaction
     Optional<String> result = validator.validateTransaction(mockTransaction, false, false);
-    
+
     // Debug the result
     System.out.println("Result present: " + result.isPresent());
     if (result.isPresent()) {
       System.out.println("Result value: " + result.get());
     }
-    
+
     // Then: Should reject due to invalid proof
     assertTrue(result.isPresent(), "Transaction should be rejected");
     if (result.isPresent()) {
-      assertTrue(result.get().contains("Proof invalid") || result.get().contains("JNI exception"), 
+      assertTrue(
+          result.get().contains("Proof invalid") || result.get().contains("JNI exception"),
           "Should mention invalid proof or JNI exception, but got: " + result.get());
     }
-    
+
     System.out.println("RlnVerifierValidatorTest: Finished testValidateTransaction_invalidProof");
   }
 
   @Test
   void testAddToDenyList_shouldPersistToFile() throws IOException {
     System.out.println("RlnVerifierValidatorTest: Starting testAddToDenyList_shouldPersistToFile");
-    
+
     // Given: Empty deny list file
     Address testAddress = Address.fromHexString("0x6666666666666666666666666666666666666666");
-    
+
     // When: Add address to deny list
     validator.addToDenyList(testAddress);
-    
+
     // Then: Should be persisted to file and loadable
     assertTrue(Files.exists(denyListFile), "Deny list file should exist");
-    
+
     String fileContent = Files.readString(denyListFile, StandardCharsets.UTF_8);
-    assertTrue(fileContent.contains(testAddress.toHexString().toLowerCase()), "File should contain the address");
-    
+    assertTrue(
+        fileContent.contains(testAddress.toHexString().toLowerCase()),
+        "File should contain the address");
+
     // Reload and verify
     validator.loadDenyListFromFileForTest();
-    assertTrue(validator.isDeniedForTest(testAddress), "Address should be in deny list after reload");
-    
+    assertTrue(
+        validator.isDeniedForTest(testAddress), "Address should be in deny list after reload");
+
     System.out.println("RlnVerifierValidatorTest: Finished testAddToDenyList_shouldPersistToFile");
   }
 
   @Test
   void testRemoveFromDenyList_shouldPersistToFile() throws IOException {
-    System.out.println("RlnVerifierValidatorTest: Starting testRemoveFromDenyList_shouldPersistToFile");
-    
+    System.out.println(
+        "RlnVerifierValidatorTest: Starting testRemoveFromDenyList_shouldPersistToFile");
+
     // Given: Address already in deny list
     Address testAddress = Address.fromHexString("0x7777777777777777777777777777777777777777");
     validator.addToDenyListForTest(testAddress, Instant.now());
     assertTrue(validator.isDeniedForTest(testAddress), "Address should initially be denied");
-    
+
     // When: Remove address from deny list
     boolean removed = validator.removeFromDenyList(testAddress);
-    
+
     // Then: Should return true and persist removal
     assertTrue(removed, "Remove operation should return true");
     assertFalse(validator.isDeniedForTest(testAddress), "Address should no longer be denied");
-    
+
     // Verify persistence
     validator.loadDenyListFromFileForTest();
-    assertFalse(validator.isDeniedForTest(testAddress), "Address should remain removed after reload");
-    
-    System.out.println("RlnVerifierValidatorTest: Finished testRemoveFromDenyList_shouldPersistToFile");
+    assertFalse(
+        validator.isDeniedForTest(testAddress), "Address should remain removed after reload");
+
+    System.out.println(
+        "RlnVerifierValidatorTest: Finished testRemoveFromDenyList_shouldPersistToFile");
   }
 
   @Test
   void testProofCacheEviction_shouldRemoveExpiredProofs() throws InterruptedException {
-    System.out.println("RlnVerifierValidatorTest: Starting testProofCacheEviction_shouldRemoveExpiredProofs");
-    
+    System.out.println(
+        "RlnVerifierValidatorTest: Starting testProofCacheEviction_shouldRemoveExpiredProofs");
+
     // Given: Short cache expiry for testing
     when(rlnConfig.rlnProofCacheExpirySeconds()).thenReturn(1L); // 1 second expiry
-    
+
     String txHash = "0x8888567890abcdef";
-    RlnVerifierValidator.CachedProof oldProof = new RlnVerifierValidator.CachedProof(
-        "0xoldproof", "0xshareX", "0xshareY", "0xepoch", "0xroot", "0xnullifier", 
-        Instant.now().minusSeconds(2)); // Already expired
-    
+    RlnVerifierValidator.CachedProof oldProof =
+        new RlnVerifierValidator.CachedProof(
+            "0xoldproof",
+            "0xshareX",
+            "0xshareY",
+            "0xepoch",
+            "0xroot",
+            "0xnullifier",
+            Instant.now().minusSeconds(2)); // Already expired
+
     // When: Add expired proof and trigger eviction
     validator.addProofToCacheForTest(txHash, oldProof);
-    assertTrue(validator.getProofFromCacheForTest(txHash).isPresent(), "Proof should initially be in cache");
-    
+    assertTrue(
+        validator.getProofFromCacheForTest(txHash).isPresent(),
+        "Proof should initially be in cache");
+
     // Wait for eviction to run (triggered by cache access)
     Thread.sleep(100);
-    
+
     // Then: Expired proof should be evicted
     // Note: The actual eviction timing depends on the LRU cache implementation
     // This test verifies the mechanism exists
-    System.out.println("RlnVerifierValidatorTest: Finished testProofCacheEviction_shouldRemoveExpiredProofs");
+    System.out.println(
+        "RlnVerifierValidatorTest: Finished testProofCacheEviction_shouldRemoveExpiredProofs");
   }
 
-  @Test 
+  @Test
   void testValidateTransaction_rlnDisabled_shouldAllow() {
     System.out.println("RlnVerifierValidatorTest: Starting testValidateTransaction_rlnDisabled");
-    
+
     // Given: RLN validation is disabled
     when(rlnConfig.rlnValidationEnabled()).thenReturn(false);
-    
+
     // Create new validator with RLN disabled (no shared services needed when disabled)
-    RlnVerifierValidator disabledValidator = new RlnVerifierValidator(rlnConfig, blockchainService, null, null);
-    
+    RlnVerifierValidator disabledValidator =
+        new RlnVerifierValidator(rlnConfig, blockchainService, null, null);
+
     Transaction mockTransaction = mock(Transaction.class);
-    when(mockTransaction.getSender()).thenReturn(Address.fromHexString("0x9999999999999999999999999999999999999999"));
-    
+    when(mockTransaction.getSender())
+        .thenReturn(Address.fromHexString("0x9999999999999999999999999999999999999999"));
+
     // When: Validate transaction
     Optional<String> result = disabledValidator.validateTransaction(mockTransaction, false, false);
-    
+
     // Then: Should allow (return empty)
     assertFalse(result.isPresent(), "Transaction should be allowed when RLN is disabled");
-    
+
     System.out.println("RlnVerifierValidatorTest: Finished testValidateTransaction_rlnDisabled");
   }
 }

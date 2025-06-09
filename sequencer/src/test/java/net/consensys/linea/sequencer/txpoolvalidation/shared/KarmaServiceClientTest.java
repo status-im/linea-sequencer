@@ -1,3 +1,17 @@
+/*
+ * Copyright Consensys Software Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package net.consensys.linea.sequencer.txpoolvalidation.shared;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -10,7 +24,6 @@ import java.util.concurrent.TimeUnit;
 import io.grpc.ManagedChannel;
 import io.grpc.Server;
 import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
@@ -29,9 +42,9 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Unit tests for KarmaServiceClient.
- * 
- * Tests the shared gRPC client functionality including connection management,
- * error handling, and proper resource cleanup.
+ *
+ * <p>Tests the shared gRPC client functionality including connection management, error handling,
+ * and proper resource cleanup.
  */
 @ExtendWith(MockitoExtension.class)
 class KarmaServiceClientTest {
@@ -79,7 +92,8 @@ class KarmaServiceClientTest {
       }
 
       if (shouldThrowError) {
-        responseObserver.onError(Status.INTERNAL.withDescription("Internal server error").asRuntimeException());
+        responseObserver.onError(
+            Status.INTERNAL.withDescription("Internal server error").asRuntimeException());
         return;
       }
 
@@ -87,7 +101,8 @@ class KarmaServiceClientTest {
         responseObserver.onNext(responseToReturn);
         responseObserver.onCompleted();
       } else {
-        responseObserver.onError(Status.INTERNAL.withDescription("No response configured").asRuntimeException());
+        responseObserver.onError(
+            Status.INTERNAL.withDescription("No response configured").asRuntimeException());
       }
     }
   }
@@ -100,19 +115,18 @@ class KarmaServiceClientTest {
   @BeforeEach
   void setUp() throws IOException {
     mockKarmaService = new MockKarmaServiceImpl();
-    
+
     String serverName = InProcessServerBuilder.generateName();
-    
-    mockServer = InProcessServerBuilder.forName(serverName)
-        .directExecutor()
-        .addService(mockKarmaService)
-        .build()
-        .start();
-        
-    inProcessChannel = InProcessChannelBuilder.forName(serverName)
-        .usePlaintext()
-        .directExecutor()
-        .build();
+
+    mockServer =
+        InProcessServerBuilder.forName(serverName)
+            .directExecutor()
+            .addService(mockKarmaService)
+            .build()
+            .start();
+
+    inProcessChannel =
+        InProcessChannelBuilder.forName(serverName).usePlaintext().directExecutor().build();
   }
 
   @AfterEach
@@ -121,7 +135,7 @@ class KarmaServiceClientTest {
       karmaServiceClient.close();
       karmaServiceClient = null;
     }
-    
+
     if (inProcessChannel != null) {
       inProcessChannel.shutdownNow();
       try {
@@ -134,7 +148,7 @@ class KarmaServiceClientTest {
       }
       inProcessChannel = null;
     }
-    
+
     if (mockServer != null) {
       mockServer.shutdownNow();
       try {
@@ -152,22 +166,23 @@ class KarmaServiceClientTest {
   @Test
   void testSuccessfulKarmaFetch() {
     // Given: Mock service returns valid karma response
-    KarmaResponse response = KarmaResponse.newBuilder()
-        .setTier("Active")
-        .setEpochTxCount(5)
-        .setDailyQuota(120)
-        .setEpochId("2024-01-01T10")
-        .setKarmaBalance(1000L)
-        .build();
+    KarmaResponse response =
+        KarmaResponse.newBuilder()
+            .setTier("Active")
+            .setEpochTxCount(5)
+            .setDailyQuota(120)
+            .setEpochId("2024-01-01T10")
+            .setKarmaBalance(1000L)
+            .build();
     mockKarmaService.setResponseToReturn(response);
-    
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 500L, inProcessChannel);
-    
+
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
+
     // When: Fetch karma info
     Address testAddress = Address.fromHexString("0x1234567890123456789012345678901234567890");
     Optional<KarmaInfo> result = karmaServiceClient.fetchKarmaInfo(testAddress);
-    
+
     // Then: Should return karma info
     assertTrue(result.isPresent());
     KarmaInfo karmaInfo = result.get();
@@ -182,14 +197,14 @@ class KarmaServiceClientTest {
   void testUserNotFound() {
     // Given: Service returns NOT_FOUND
     mockKarmaService.setShouldThrowNotFound(true);
-    
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 500L, inProcessChannel);
-    
+
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
+
     // When: Fetch karma info for non-existent user
     Address testAddress = Address.fromHexString("0x1234567890123456789012345678901234567890");
     Optional<KarmaInfo> result = karmaServiceClient.fetchKarmaInfo(testAddress);
-    
+
     // Then: Should return empty
     assertFalse(result.isPresent());
   }
@@ -198,14 +213,15 @@ class KarmaServiceClientTest {
   void testServiceTimeout() {
     // Given: Service causes timeout
     mockKarmaService.setShouldTimeout(true);
-    
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 100L, inProcessChannel); // Short timeout
-    
+
+    karmaServiceClient =
+        new KarmaServiceClient(
+            "TestClient", "localhost", 8080, false, 100L, inProcessChannel); // Short timeout
+
     // When: Fetch karma info
     Address testAddress = Address.fromHexString("0x1234567890123456789012345678901234567890");
     Optional<KarmaInfo> result = karmaServiceClient.fetchKarmaInfo(testAddress);
-    
+
     // Then: Should return empty due to timeout
     assertFalse(result.isPresent());
   }
@@ -214,14 +230,14 @@ class KarmaServiceClientTest {
   void testServiceError() {
     // Given: Service returns internal error
     mockKarmaService.setShouldThrowError(true);
-    
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 500L, inProcessChannel);
-    
+
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
+
     // When: Fetch karma info
     Address testAddress = Address.fromHexString("0x1234567890123456789012345678901234567890");
     Optional<KarmaInfo> result = karmaServiceClient.fetchKarmaInfo(testAddress);
-    
+
     // Then: Should return empty due to error
     assertFalse(result.isPresent());
   }
@@ -229,12 +245,12 @@ class KarmaServiceClientTest {
   @Test
   void testClientWithoutProvidedChannel() {
     // Given: Client created without pre-configured channel
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 9999, false, 500L); // Non-existent port
-    
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 9999, false, 500L); // Non-existent port
+
     // When: Check availability
     boolean isAvailable = karmaServiceClient.isAvailable();
-    
+
     // Then: Should be available (channel created but connection may fail on use)
     assertTrue(isAvailable);
   }
@@ -242,12 +258,12 @@ class KarmaServiceClientTest {
   @Test
   void testClientAvailability() {
     // Given: Client with valid channel
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 500L, inProcessChannel);
-    
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
+
     // When: Check availability
     boolean isAvailable = karmaServiceClient.isAvailable();
-    
+
     // Then: Should be available
     assertTrue(isAvailable);
   }
@@ -255,13 +271,13 @@ class KarmaServiceClientTest {
   @Test
   void testClientUnavailableAfterClose() throws IOException {
     // Given: Client with valid channel
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 500L, inProcessChannel);
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
     assertTrue(karmaServiceClient.isAvailable());
-    
+
     // When: Close the client
     karmaServiceClient.close();
-    
+
     // Then: Should not be available
     assertFalse(karmaServiceClient.isAvailable());
   }
@@ -269,9 +285,8 @@ class KarmaServiceClientTest {
   @Test
   void testTlsConfiguration() {
     // Given: Client configured for TLS
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, true, 500L);
-    
+    karmaServiceClient = new KarmaServiceClient("TestClient", "localhost", 8080, true, 500L);
+
     // When: Check if client was created
     // Then: Should not throw exception during creation
     assertNotNull(karmaServiceClient);
@@ -282,11 +297,11 @@ class KarmaServiceClientTest {
   void testClientWithShutdownChannel() {
     // Given: Pre-shutdown channel
     inProcessChannel.shutdown();
-    
+
     // When: Create client with shutdown channel
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 500L, inProcessChannel);
-    
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
+
     // Then: Should create new channel instead of using provided one
     assertNotNull(karmaServiceClient);
   }
@@ -294,14 +309,14 @@ class KarmaServiceClientTest {
   @Test
   void testMultipleClose() throws IOException {
     // Given: Client with valid channel
-    karmaServiceClient = new KarmaServiceClient(
-        "TestClient", "localhost", 8080, false, 500L, inProcessChannel);
-    
+    karmaServiceClient =
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
+
     // When: Close multiple times
     karmaServiceClient.close();
     karmaServiceClient.close(); // Should not throw exception
-    
+
     // Then: Should handle gracefully
     assertFalse(karmaServiceClient.isAvailable());
   }
-} 
+}

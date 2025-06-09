@@ -64,10 +64,11 @@ public class LineaEstimateGasEndpointPlugin extends AbstractLineaRequiredPlugin 
   @Override
   public void beforeExternalServices() {
     super.beforeExternalServices();
-    
+
     // Initialize shared services
-    sharedServiceManager = new SharedServiceManager(rlnValidatorConfiguration(), lineaRpcConfiguration());
-    
+    sharedServiceManager =
+        new SharedServiceManager(rlnValidatorConfiguration(), lineaRpcConfiguration());
+
     lineaEstimateGasMethod.init(
         lineaRpcConfiguration(),
         transactionPoolValidatorConfiguration(),
@@ -89,7 +90,7 @@ public class LineaEstimateGasEndpointPlugin extends AbstractLineaRequiredPlugin 
     if (lineaEstimateGasMethod != null) {
       lineaEstimateGasMethod.stop();
     }
-    
+
     if (sharedServiceManager != null) {
       try {
         sharedServiceManager.close();

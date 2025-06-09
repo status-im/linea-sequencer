@@ -26,13 +26,13 @@ import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaTransactionPoolValidatorConfiguration;
 import net.consensys.linea.jsonrpc.JsonRpcManager;
 import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.SharedServiceManager;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.AllowedAddressValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.CalldataValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.GasLimitValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.ProfitabilityValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.RlnVerifierValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.SimulationValidator;
-import net.consensys.linea.sequencer.txpoolvalidation.shared.SharedServiceManager;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
 import org.hyperledger.besu.plugin.services.BlockchainService;
@@ -98,8 +98,12 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
 
     // Conditionally add RLN Validator
     if (rlnValidatorConf.rlnValidationEnabled()) {
-      validatorsList.add(new RlnVerifierValidator(rlnValidatorConf, blockchainService, 
-          sharedServiceManager.getDenyListManager(), sharedServiceManager.getKarmaServiceClient()));
+      validatorsList.add(
+          new RlnVerifierValidator(
+              rlnValidatorConf,
+              blockchainService,
+              sharedServiceManager.getDenyListManager(),
+              sharedServiceManager.getKarmaServiceClient()));
     }
 
     validatorsList.add(

@@ -33,11 +33,12 @@ public class LineaRpcCliOptions implements LineaCliOptions {
   private static final BigDecimal DEFAULT_ESTIMATE_GAS_COMPATIBILITY_MODE_MULTIPLIER =
       BigDecimal.valueOf(1.2);
 
-  // CLI options for gasless features 
+  // CLI options for gasless features
   private static final String RPC_GASLESS_ENABLED = "--plugin-linea-rpc-gasless-enabled";
   private static final boolean DEFAULT_RPC_GASLESS_ENABLED = false;
 
-  private static final String RPC_PREMIUM_GAS_MULTIPLIER = "--plugin-linea-rpc-premium-gas-multiplier";
+  private static final String RPC_PREMIUM_GAS_MULTIPLIER =
+      "--plugin-linea-rpc-premium-gas-multiplier";
   private static final double DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER = 1.5; // Example default
 
   private static final String RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS =
@@ -51,10 +52,12 @@ public class LineaRpcCliOptions implements LineaCliOptions {
   private static final String RPC_KARMA_SERVICE_PORT = "--plugin-linea-rpc-karma-service-port";
   private static final int DEFAULT_RPC_KARMA_SERVICE_PORT = 50052;
 
-  private static final String RPC_KARMA_SERVICE_USE_TLS = "--plugin-linea-rpc-karma-service-use-tls";
+  private static final String RPC_KARMA_SERVICE_USE_TLS =
+      "--plugin-linea-rpc-karma-service-use-tls";
   private static final boolean DEFAULT_RPC_KARMA_SERVICE_USE_TLS = false;
 
-  private static final String RPC_KARMA_SERVICE_TIMEOUT_MS = "--plugin-linea-rpc-karma-service-timeout-ms";
+  private static final String RPC_KARMA_SERVICE_TIMEOUT_MS =
+      "--plugin-linea-rpc-karma-service-timeout-ms";
   private static final long DEFAULT_RPC_KARMA_SERVICE_TIMEOUT_MS = 5000L;
 
   @CommandLine.Option(

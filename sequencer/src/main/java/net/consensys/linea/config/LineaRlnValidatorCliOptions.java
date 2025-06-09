@@ -1,3 +1,17 @@
+/*
+ * Copyright Consensys Software Inc.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 package net.consensys.linea.config;
 
 import java.util.Optional;
@@ -98,7 +112,8 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
 
   @CommandLine.Option(
       names = "--plugin-linea-rln-karma-service-timeout-ms",
-      description = "Timeout for karma service requests in milliseconds (default: ${DEFAULT-VALUE})",
+      description =
+          "Timeout for karma service requests in milliseconds (default: ${DEFAULT-VALUE})",
       arity = "1")
   private long karmaServiceTimeoutMs =
       LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceTimeoutMs();
@@ -112,10 +127,10 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
 
   @CommandLine.Option(
       names = "--plugin-linea-rln-max-backoff-delay-ms",
-      description = "Maximum backoff delay for gRPC reconnections in milliseconds (default: ${DEFAULT-VALUE})",
+      description =
+          "Maximum backoff delay for gRPC reconnections in milliseconds (default: ${DEFAULT-VALUE})",
       arity = "1")
-  private long maxBackoffDelayMs =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.maxBackoffDelayMs();
+  private long maxBackoffDelayMs = LineaRlnValidatorConfiguration.V1_DEFAULT.maxBackoffDelayMs();
 
   @CommandLine.Option(
       names = "--plugin-linea-rln-default-epoch-for-quota",
