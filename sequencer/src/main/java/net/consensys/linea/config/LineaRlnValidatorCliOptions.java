@@ -78,12 +78,44 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
       LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofLocalWaitTimeoutMs();
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-karma-service-url",
-      description =
-          "Optional URL to an HTTP service that provides user karma/tier information (default: none, overrides DB if specified)",
+      names = "--plugin-linea-rln-karma-service-host",
+      description = "Hostname for the Karma gRPC service (default: ${DEFAULT-VALUE})",
       arity = "1")
-  private Optional<String> karmaServiceUrl =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceUrl();
+  private String karmaServiceHost = LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceHost();
+
+  @CommandLine.Option(
+      names = "--plugin-linea-rln-karma-service-port",
+      description = "Port for the Karma gRPC service (default: ${DEFAULT-VALUE})",
+      arity = "1")
+  private int karmaServicePort = LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServicePort();
+
+  @CommandLine.Option(
+      names = "--plugin-linea-rln-karma-service-use-tls",
+      description = "Use TLS for gRPC connection to karma service (default: ${DEFAULT-VALUE})",
+      arity = "1")
+  private boolean karmaServiceUseTls =
+      LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceUseTls();
+
+  @CommandLine.Option(
+      names = "--plugin-linea-rln-karma-service-timeout-ms",
+      description = "Timeout for karma service requests in milliseconds (default: ${DEFAULT-VALUE})",
+      arity = "1")
+  private long karmaServiceTimeoutMs =
+      LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceTimeoutMs();
+
+  @CommandLine.Option(
+      names = "--plugin-linea-rln-exponential-backoff-enabled",
+      description = "Enable exponential backoff for gRPC reconnections (default: ${DEFAULT-VALUE})",
+      arity = "1")
+  private boolean exponentialBackoffEnabled =
+      LineaRlnValidatorConfiguration.V1_DEFAULT.exponentialBackoffEnabled();
+
+  @CommandLine.Option(
+      names = "--plugin-linea-rln-max-backoff-delay-ms",
+      description = "Maximum backoff delay for gRPC reconnections in milliseconds (default: ${DEFAULT-VALUE})",
+      arity = "1")
+  private long maxBackoffDelayMs =
+      LineaRlnValidatorConfiguration.V1_DEFAULT.maxBackoffDelayMs();
 
   @CommandLine.Option(
       names = "--plugin-linea-rln-default-epoch-for-quota",
@@ -124,7 +156,12 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
         rlnProofStreamRetryIntervalMs,
         rlnProofLocalWaitTimeoutMs,
         sharedGaslessCliOptions.toDomainObject(),
-        karmaServiceUrl,
+        karmaServiceHost,
+        karmaServicePort,
+        karmaServiceUseTls,
+        karmaServiceTimeoutMs,
+        exponentialBackoffEnabled,
+        maxBackoffDelayMs,
         defaultEpochForQuota,
         rlnJniLibPath);
   }

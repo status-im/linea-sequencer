@@ -20,6 +20,7 @@ import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeParseException;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -27,6 +28,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -34,9 +36,14 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.rln.jni.RlnBridge;
+import net.consensys.linea.rln.proofs.grpc.GetKarmaRequest;
+import net.consensys.linea.rln.proofs.grpc.KarmaResponse;
+import net.consensys.linea.rln.proofs.grpc.KarmaServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.ProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
@@ -49,6 +56,47 @@ import org.hyperledger.besu.plugin.services.txvalidator.PluginTransactionPoolVal
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+/**
+ * RLN (Rate Limiting Nullifier) Verifier Validator for gasless transaction validation.
+ * 
+ * <p>This validator implements a comprehensive RLN verification system that:
+ * <ul>
+ *   <li>Maintains a deny list of addresses that have exceeded their quotas</li>
+ *   <li>Verifies RLN proofs using JNI calls to Rust implementation</li>
+ *   <li>Manages quota enforcement through gRPC Karma service integration</li>
+ *   <li>Provides premium gas bypass functionality for deny-listed users</li>
+ * </ul>
+ * 
+ * <p><strong>Core Validation Flow:</strong>
+ * <ol>
+ *   <li>Check if sender is on deny list and validate premium gas if required</li>
+ *   <li>Retrieve and verify RLN proof from in-memory cache</li>
+ *   <li>Validate proof authenticity using cryptographic verification</li>
+ *   <li>Check user's karma quota through gRPC service</li>
+ *   <li>Add to deny list if quota exceeded, otherwise allow transaction</li>
+ * </ol>
+ * 
+ * <p><strong>gRPC Integration:</strong>
+ * This validator maintains two gRPC connections:
+ * <ul>
+ *   <li>RLN Proof Service: Streaming server for receiving RLN proofs</li>
+ *   <li>Karma Service: Request-response service for quota validation</li>
+ * </ul>
+ * Both connections feature exponential backoff reconnection strategies.
+ * 
+ * <p><strong>Cache Management:</strong>
+ * Implements an LRU cache with TTL expiration for efficient proof storage
+ * and retrieval during asynchronous transaction validation.
+ * 
+ * <p><strong>Thread Safety:</strong>
+ * All operations are thread-safe using concurrent data structures and
+ * proper synchronization for file I/O operations.
+ * 
+ * @see PluginTransactionPoolValidator
+ * @see LineaRlnValidatorConfiguration
+ * @author Status Network Development Team
+ * @since 1.0
+ */
 public class RlnVerifierValidator implements PluginTransactionPoolValidator, Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(RlnVerifierValidator.class);
   private static final String RLN_VALIDATION_FAILED_MESSAGE = "RLN validation failed";
@@ -71,7 +119,17 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   private ScheduledExecutorService denyListRefreshScheduler;
   private ScheduledExecutorService proofCacheEvictionScheduler;
 
-  // In-memory cache for RLN proofs
+  /**
+   * Represents a cached RLN proof with all required public inputs.
+   * 
+   * @param proofBytesHex Hex-encoded proof bytes from ZK proof generation
+   * @param shareXHex X-coordinate of the secret share (public input)
+   * @param shareYHex Y-coordinate of the secret share (public input)
+   * @param epochHex Current epoch identifier (public input)
+   * @param rootHex Merkle tree root of the RLN membership tree (public input)
+   * @param nullifierHex Unique nullifier for this transaction (public input)
+   * @param cachedAt Timestamp when this proof was cached for TTL management
+   */
   record CachedProof(
       String proofBytesHex,
       String shareXHex,
@@ -81,33 +139,93 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       String nullifierHex,
       Instant cachedAt) {}
 
-  private final Map<String, CachedProof> rlnProofCache = new ConcurrentHashMap<>();
+  /**
+   * LRU Cache implementation with TTL support for RLN proofs.
+   * 
+   * <p>This cache automatically evicts the least recently used entries when
+   * capacity is reached and supports time-based expiration for stale proofs.
+   */
+  private static class LRUProofCache extends LinkedHashMap<String, CachedProof> {
+    private final int maxSize;
+    private final long ttlSeconds;
+
+    public LRUProofCache(int maxSize, long ttlSeconds) {
+      super(maxSize + 1, 0.75f, true);
+      this.maxSize = maxSize;
+      this.ttlSeconds = ttlSeconds;
+    }
+
+    @Override
+    protected boolean removeEldestEntry(Map.Entry<String, CachedProof> eldest) {
+      return size() > maxSize || 
+             (eldest.getValue().cachedAt().isBefore(Instant.now().minusSeconds(ttlSeconds)));
+    }
+
+    public void evictExpired() {
+      Instant cutoff = Instant.now().minusSeconds(ttlSeconds);
+      entrySet().removeIf(entry -> entry.getValue().cachedAt().isBefore(cutoff));
+    }
+  }
+
+  private final LRUProofCache rlnProofCache;
 
   // gRPC client members for proof service
   private ManagedChannel proofServiceChannel;
   private RlnProofServiceGrpc.RlnProofServiceStub asyncProofStub;
+  
+  // gRPC client members for karma service  
+  private ManagedChannel karmaServiceChannel;
+  private KarmaServiceGrpc.KarmaServiceBlockingStub karmaServiceStub;
+  
   private ScheduledExecutorService grpcReconnectionScheduler;
+  
+  // Exponential backoff state
+  private final AtomicInteger proofStreamRetryCount = new AtomicInteger(0);
+  private volatile long lastProofStreamRetryTime = 0;
 
-  // New record for Karma Information
-  private record KarmaInfo(String tier, int epochTxCount, int dailyQuota, String epochId) {}
+  /**
+   * Represents user karma information retrieved from the Karma Service.
+   * 
+   * @param tier User's karma tier (e.g., "Basic", "Active", "Regular")
+   * @param epochTxCount Number of transactions used in current epoch
+   * @param dailyQuota Daily transaction quota for this tier
+   * @param epochId Current epoch identifier from karma service
+   * @param karmaBalance User's total karma balance
+   */
+  private record KarmaInfo(String tier, int epochTxCount, int dailyQuota, String epochId, long karmaBalance) {}
 
+  /**
+   * Creates a new RLN Verifier Validator with default gRPC channel management.
+   * 
+   * @param rlnConfig Configuration for RLN validation including service endpoints
+   * @param blockchainService Blockchain service for accessing chain state
+   */
   public RlnVerifierValidator(
       LineaRlnValidatorConfiguration rlnConfig, BlockchainService blockchainService) {
-    this(rlnConfig, blockchainService, null);
+    this(rlnConfig, blockchainService, null, null);
   }
 
   /**
-   * Constructor for testing purposes, allowing injection of a ManagedChannel. If providedChannel is
-   * null, a new channel will be created based on configuration.
+   * Creates a new RLN Verifier Validator with optional pre-configured gRPC channels.
+   * 
+   * <p>This constructor is primarily intended for testing scenarios where
+   * mock gRPC channels need to be injected.
+   * 
+   * @param rlnConfig Configuration for RLN validation
+   * @param blockchainService Blockchain service for accessing chain state
+   * @param providedProofChannel Optional pre-configured proof service channel
+   * @param providedKarmaChannel Optional pre-configured karma service channel
    */
   @VisibleForTesting
   RlnVerifierValidator(
       LineaRlnValidatorConfiguration rlnConfig,
       BlockchainService blockchainService,
-      ManagedChannel providedChannel) {
+      ManagedChannel providedProofChannel,
+      ManagedChannel providedKarmaChannel) {
     this.rlnConfig = rlnConfig;
     this.blockchainService = blockchainService;
-    this.proofServiceChannel = providedChannel;
+    this.proofServiceChannel = providedProofChannel;
+    this.karmaServiceChannel = providedKarmaChannel;
 
     String pathString = rlnConfig.sharedGaslessConfig().denyListPath();
     if (pathString == null) {
@@ -117,6 +235,12 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
           "denyListPath from sharedGaslessConfig cannot be null, check rlnConfig stubbing in tests or real configuration.");
     }
     this.denyListFilePath = Paths.get(pathString);
+    
+    // Initialize LRU cache with TTL support
+    this.rlnProofCache = new LRUProofCache(
+        (int) rlnConfig.rlnProofCacheMaxSize(),
+        rlnConfig.rlnProofCacheExpirySeconds()
+    );
 
     if (rlnConfig.rlnValidationEnabled()) {
       LOG.info("RLN Validator is ENABLED.");
@@ -136,43 +260,12 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         throw new IllegalStateException(
             "Failed to initialize RlnVerifierValidator: JNI linkage error", e);
       }
+      
       loadDenyListFromFile();
-
-      long refreshIntervalSeconds = rlnConfig.denyListRefreshSeconds();
-      if (refreshIntervalSeconds > 0) {
-        denyListRefreshScheduler =
-            Executors.newSingleThreadScheduledExecutor(
-                r -> {
-                  Thread t = Executors.defaultThreadFactory().newThread(r);
-                  t.setName("RlnVerifierValidator-DenyListRefresh");
-                  t.setDaemon(true);
-                  return t;
-                });
-        denyListRefreshScheduler.scheduleAtFixedRate(
-            this::loadDenyListFromFile,
-            refreshIntervalSeconds,
-            refreshIntervalSeconds,
-            TimeUnit.SECONDS);
-        LOG.info(
-            "Scheduled RLN deny list refresh every {} seconds from {}.",
-            refreshIntervalSeconds,
-            denyListFilePath);
-      } else {
-        LOG.info("RLN deny list auto-refresh is DISABLED (refresh interval <= 0).");
-      }
-
-      // Re-enable gRPC client and scheduler initialization
-      initializeProofServiceClient();
+      startDenyListRefreshScheduler();
+      initializeGrpcClients();
       startProofStreamSubscription();
-
-      // Schedule proof cache eviction
-      proofCacheEvictionScheduler =
-          Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "RlnProofCacheEviction"));
-      proofCacheEvictionScheduler.scheduleAtFixedRate(
-          this::evictExpiredProofs,
-          this.rlnConfig.rlnProofCacheExpirySeconds() / 2,
-          this.rlnConfig.rlnProofCacheExpirySeconds() / 2,
-          TimeUnit.SECONDS);
+      startProofCacheEvictionScheduler();
 
     } else {
       this.rlnVerifyingKeyBytes = null;
@@ -180,6 +273,27 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
   }
 
+  /**
+   * Initializes gRPC client connections for both proof and karma services.
+   * 
+   * <p>Creates managed channels with appropriate TLS configuration based
+   * on the provided configuration. Supports both injected channels (for testing)
+   * and dynamically created channels.
+   */
+  private void initializeGrpcClients() {
+    // Initialize proof service client
+    initializeProofServiceClient();
+    
+    // Initialize karma service client
+    initializeKarmaServiceClient();
+  }
+
+  /**
+   * Initializes the gRPC client for the RLN Proof Service.
+   * 
+   * <p>Creates a managed channel configured for streaming proof reception
+   * with appropriate TLS settings based on configuration.
+   */
   private void initializeProofServiceClient() {
     boolean wasChannelProvided =
         (this.proofServiceChannel != null && !this.proofServiceChannel.isShutdown());
@@ -212,6 +326,52 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
   }
 
+  /**
+   * Initializes the gRPC client for the Karma Service.
+   * 
+   * <p>Creates a managed channel configured for request-response karma
+   * validation with appropriate timeout and TLS settings.
+   */
+  private void initializeKarmaServiceClient() {
+    boolean wasChannelProvided =
+        (this.karmaServiceChannel != null && !this.karmaServiceChannel.isShutdown());
+
+    if (wasChannelProvided) {
+      LOG.info("Using pre-configured ManagedChannel for Karma Service client.");
+    } else {
+      LOG.info("Creating new ManagedChannel for Karma Service client based on configuration.");
+      ManagedChannelBuilder<?> channelBuilder =
+          ManagedChannelBuilder.forAddress(
+              rlnConfig.karmaServiceHost(), rlnConfig.karmaServicePort());
+
+      if (rlnConfig.karmaServiceUseTls()) {
+        channelBuilder.useTransportSecurity();
+      } else {
+        channelBuilder.usePlaintext();
+      }
+      this.karmaServiceChannel = channelBuilder.build();
+    }
+
+    this.karmaServiceStub = KarmaServiceGrpc.newBlockingStub(this.karmaServiceChannel)
+        .withDeadlineAfter(rlnConfig.karmaServiceTimeoutMs(), TimeUnit.MILLISECONDS);
+
+    if (wasChannelProvided) {
+      LOG.info("Karma Service client initialized with injected ManagedChannel.");
+    } else {
+      LOG.info(
+          "Karma Service client initialized for target: {}:{}",
+          rlnConfig.karmaServiceHost(),
+          rlnConfig.karmaServicePort());
+    }
+  }
+
+  /**
+   * Starts the gRPC streaming subscription for receiving RLN proofs.
+   * 
+   * <p>Establishes a persistent streaming connection to receive proofs
+   * asynchronously as they are generated by the proof service.
+   * Implements automatic reconnection with exponential backoff on failures.
+   */
   private void startProofStreamSubscription() {
     if (asyncProofStub == null) {
       LOG.error("Cannot start RLN proof stream: gRPC stub not initialized.");
@@ -236,66 +396,151 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
                     proofMessage.getRootHex(),
                     proofMessage.getNullifierHex(),
                     Instant.now());
-            if (rlnProofCache.size() < rlnConfig.rlnProofCacheMaxSize()) {
+            
+            synchronized(rlnProofCache) {
               rlnProofCache.put(proofMessage.getTxHash(), cachedProof);
-            } else {
-              LOG.warn(
-                  "RLN proof cache full (size {}). Discarding proof for tx {}. Consider increasing rlnProofCacheMaxSize.",
-                  rlnProofCache.size(),
-                  proofMessage.getTxHash());
-              // Optionally, could implement LRU eviction here on put if cache is full
             }
+            LOG.trace("Proof cached for txHash: {}, cache size: {}", 
+                     proofMessage.getTxHash(), rlnProofCache.size());
+            
+            // Reset retry count on successful message
+            proofStreamRetryCount.set(0);
           }
 
           @Override
           public void onError(Throwable t) {
             LOG.error("RLN proof stream error: {}. Attempting to reconnect...", t.getMessage(), t);
-            scheduleReconnection();
+            scheduleProofStreamReconnection();
           }
 
           @Override
           public void onCompleted() {
             LOG.info("RLN proof stream completed by server. Attempting to reconnect...");
-            scheduleReconnection();
+            scheduleProofStreamReconnection();
           }
         });
   }
 
-  private void scheduleReconnection() {
+  /**
+   * Schedules reconnection for the proof stream using exponential backoff strategy.
+   * 
+   * <p>Implements intelligent reconnection with increasing delays to avoid
+   * overwhelming a failing service while ensuring eventual connectivity restoration.
+   * 
+   * <p><strong>Backoff Strategy:</strong>
+   * <ul>
+   *   <li>Base delay from configuration (rlnProofStreamRetryIntervalMs)</li>
+   *   <li>Exponential increase: delay = base * 2^(retry_count)</li>
+   *   <li>Maximum delay capped by maxBackoffDelayMs configuration</li>
+   *   <li>Retry count resets on successful connection</li>
+   * </ul>
+   */
+  private void scheduleProofStreamReconnection() {
     if (grpcReconnectionScheduler == null || grpcReconnectionScheduler.isShutdown()) {
       grpcReconnectionScheduler =
           Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "RlnGrpcReconnect"));
     }
-    // Simple fixed delay reconnection. Could be made more sophisticated (e.g. exponential backoff)
-    // and use rlnConfig.rlnProofStreamRetries()
+
+    long delay;
+    if (rlnConfig.exponentialBackoffEnabled()) {
+      int retryCount = proofStreamRetryCount.getAndIncrement();
+      // Ensure we don't exceed max retries
+      if (retryCount >= rlnConfig.rlnProofStreamRetries()) {
+        LOG.error("Maximum proof stream retry attempts ({}) exceeded. Stopping reconnection attempts.", 
+                 rlnConfig.rlnProofStreamRetries());
+        return;
+      }
+      
+      // Calculate exponential backoff: base * 2^retryCount, capped at max
+      delay = Math.min(
+          rlnConfig.rlnProofStreamRetryIntervalMs() * (1L << retryCount),
+          rlnConfig.maxBackoffDelayMs()
+      );
+      
+      LOG.info(
+          "Scheduling gRPC proof stream reconnection in {} ms (attempt {}/{})",
+          delay, retryCount + 1, rlnConfig.rlnProofStreamRetries());
+    } else {
+      // Simple fixed delay reconnection
+      delay = rlnConfig.rlnProofStreamRetryIntervalMs();
+      LOG.info("Scheduling gRPC proof stream reconnection in {} ms (fixed delay)", delay);
+    }
+
+    lastProofStreamRetryTime = System.currentTimeMillis();
     grpcReconnectionScheduler.schedule(
         this::startProofStreamSubscription,
-        rlnConfig.rlnProofStreamRetryIntervalMs(),
+        delay,
         TimeUnit.MILLISECONDS);
-    LOG.info(
-        "Scheduled gRPC proof stream reconnection in {} ms.",
-        rlnConfig.rlnProofStreamRetryIntervalMs());
   }
 
+  /**
+   * Starts the scheduled task for deny list file refresh.
+   * 
+   * <p>Periodically reloads the deny list from the configured file path
+   * to pick up external modifications and perform TTL-based cleanup.
+   */
+  private void startDenyListRefreshScheduler() {
+    long refreshIntervalSeconds = rlnConfig.denyListRefreshSeconds();
+    if (refreshIntervalSeconds > 0) {
+      denyListRefreshScheduler =
+          Executors.newSingleThreadScheduledExecutor(
+              r -> {
+                Thread t = Executors.defaultThreadFactory().newThread(r);
+                t.setName("RlnVerifierValidator-DenyListRefresh");
+                t.setDaemon(true);
+                return t;
+              });
+      denyListRefreshScheduler.scheduleAtFixedRate(
+          this::loadDenyListFromFile,
+          refreshIntervalSeconds,
+          refreshIntervalSeconds,
+          TimeUnit.SECONDS);
+      LOG.info(
+          "Scheduled RLN deny list refresh every {} seconds from {}.",
+          refreshIntervalSeconds,
+          denyListFilePath);
+    } else {
+      LOG.info("RLN deny list auto-refresh is DISABLED (refresh interval <= 0).");
+    }
+  }
+
+  /**
+   * Starts the scheduled task for proof cache eviction.
+   * 
+   * <p>Periodically removes expired proofs from the in-memory cache
+   * to prevent memory leaks and ensure fresh proof validation.
+   */
+  private void startProofCacheEvictionScheduler() {
+    proofCacheEvictionScheduler =
+        Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "RlnProofCacheEviction"));
+    proofCacheEvictionScheduler.scheduleAtFixedRate(
+        this::evictExpiredProofs,
+        this.rlnConfig.rlnProofCacheExpirySeconds() / 2,
+        this.rlnConfig.rlnProofCacheExpirySeconds() / 2,
+        TimeUnit.SECONDS);
+  }
+
+  /**
+   * Evicts expired proofs from the LRU cache.
+   * 
+   * <p>Removes proofs that have exceeded their TTL to maintain cache
+   * freshness and prevent validation against stale proofs.
+   */
   private void evictExpiredProofs() {
     LOG.debug("Running RLN proof cache eviction. Current size: {}", rlnProofCache.size());
-    Instant expiryThreshold = Instant.now().minusSeconds(rlnConfig.rlnProofCacheExpirySeconds());
-    rlnProofCache
-        .entrySet()
-        .removeIf(
-            entry -> {
-              boolean expired = entry.getValue().cachedAt().isBefore(expiryThreshold);
-              if (expired) {
-                LOG.trace(
-                    "Evicting expired proof for txHash: {} (cached at {})",
-                    entry.getKey(),
-                    entry.getValue().cachedAt());
-              }
-              return expired;
-            });
+    synchronized(rlnProofCache) {
+      rlnProofCache.evictExpired();
+    }
     LOG.debug("RLN proof cache eviction finished. Size after eviction: {}", rlnProofCache.size());
   }
 
+  /**
+   * Loads the deny list from the configured file path.
+   * 
+   * <p>Reads deny list entries from file in format: "address,timestamp"
+   * and automatically removes expired entries based on configured TTL.
+   * Updates are atomic to prevent inconsistent state during concurrent access.
+   */
   private void loadDenyListFromFile() {
     if (!Files.exists(denyListFilePath)) {
       LOG.info("Deny list file not found at {}, starting with an empty list.", denyListFilePath);
@@ -347,6 +592,12 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
   }
 
+  /**
+   * Atomically saves the current deny list state to file.
+   * 
+   * <p>Uses atomic file operations (write to temp, then move) to ensure
+   * file consistency and prevent corruption during concurrent access.
+   */
   private void saveDenyListToFile() {
     Map<Address, Instant> denyListSnapshot = new HashMap<>(denyList);
     List<String> entriesAsString =
@@ -379,6 +630,11 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
   }
 
+  /**
+   * Adds an address to the deny list with current timestamp.
+   * 
+   * @param address The address to add to the deny list
+   */
   void addToDenyList(final Address address) {
     if (denyList.put(address, Instant.now()) == null) {
       saveDenyListToFile();
@@ -390,6 +646,12 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
   }
 
+  /**
+   * Removes an address from the deny list.
+   * 
+   * @param address The address to remove from the deny list
+   * @return true if the address was in the list and removed, false otherwise
+   */
   boolean removeFromDenyList(final Address address) {
     if (denyList.remove(address) != null) {
       saveDenyListToFile();
@@ -402,22 +664,17 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     return false;
   }
 
-  void addToDenyListForTest(Address user, Instant addedAt) {
-    denyList.put(user, addedAt);
-    saveDenyListToFile();
-  }
-
-  boolean isDeniedForTest(Address user) {
-    Instant addedAt = denyList.get(user);
-    if (addedAt == null) return false;
-    long maxAgeMillis = TimeUnit.MINUTES.toMillis(rlnConfig.denyListEntryMaxAgeMinutes());
-    return (Instant.now().toEpochMilli() - addedAt.toEpochMilli()) < maxAgeMillis;
-  }
-
-  void loadDenyListFromFileForTest() {
-    this.loadDenyListFromFile();
-  }
-
+  /**
+   * Generates the current epoch identifier based on configuration.
+   * 
+   * <p>Supports different epoch strategies:
+   * <ul>
+   *   <li>"BLOCK" - Uses current block number</li>
+   *   <li>"TIMESTAMP_1H" - Uses hourly timestamp buckets</li>
+   * </ul>
+   * 
+   * @return The current epoch identifier string
+   */
   private String getCurrentEpochIdentifier() {
     var currentHeader = blockchainService.getChainHeadHeader();
     long timestamp = currentHeader.getTimestamp();
@@ -439,83 +696,83 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     };
   }
 
+  /**
+   * Fetches karma information for a user via gRPC Karma Service.
+   * 
+   * <p>Retrieves current karma status including tier, quota, and usage
+   * information for the specified user address. Includes proper error
+   * handling for gRPC failures and timeouts.
+   * 
+   * @param userAddress The user address to query karma information for
+   * @return Optional containing karma info if successful, empty on failure
+   */
   private Optional<KarmaInfo> fetchKarmaInfoFromService(Address userAddress) {
-    if (rlnConfig.karmaServiceUrl().isEmpty()) {
-      LOG.warn("Karma service URL not configured. Cannot fetch karma info.");
+    if (karmaServiceStub == null) {
+      LOG.warn("Karma service not configured. Cannot fetch karma info.");
       return Optional.empty();
     }
-    String baseUrl = rlnConfig.karmaServiceUrl().get();
-    // Ensure no double slashes if baseUrl ends with / and query starts with /
-    String fullUrl =
-        baseUrl.endsWith("/") ? baseUrl + "karma?userAddress=" : baseUrl + "/karma?userAddress=";
-    fullUrl += userAddress.toHexString();
 
-    HttpRequest request =
-        HttpRequest.newBuilder()
-            .uri(URI.create(fullUrl))
-            .header("Accept", "application/json")
-            .timeout(Duration.ofSeconds(5)) // Per-request timeout
-            .GET()
-            .build();
+    GetKarmaRequest request = GetKarmaRequest.newBuilder()
+        .setUserAddress(userAddress.toHexString())
+        .build();
 
     try {
-      LOG.debug("Fetching karma info for user {} from {}", userAddress.toHexString(), fullUrl);
-      HttpResponse<String> response =
-          httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+      LOG.debug("Fetching karma info for user {} via gRPC", userAddress.toHexString());
+      KarmaResponse response = karmaServiceStub.getKarma(request);
 
-      if (response.statusCode() == 200) {
-        String responseBody = response.body();
-        LOG.debug("Karma service response for {}: {}", userAddress.toHexString(), responseBody);
+      LOG.debug("Karma service response for {}: tier={}, epochTxCount={}, dailyQuota={}, epochId={}",
+               userAddress.toHexString(), response.getTier(), response.getEpochTxCount(),
+               response.getDailyQuota(), response.getEpochId());
 
-        Matcher tierMatcher = KARMA_TIER_JSON_PATTERN.matcher(responseBody);
-        Matcher countMatcher = KARMA_EPOCH_TX_COUNT_JSON_PATTERN.matcher(responseBody);
-        Matcher quotaMatcher = KARMA_DAILY_QUOTA_JSON_PATTERN.matcher(responseBody);
-        Matcher epochIdMatcher = KARMA_EPOCH_ID_JSON_PATTERN.matcher(responseBody);
+      return Optional.of(new KarmaInfo(
+          response.getTier(),
+          response.getEpochTxCount(),
+          response.getDailyQuota(),
+          response.getEpochId(),
+          response.getKarmaBalance()
+      ));
 
-        if (tierMatcher.find()
-            && countMatcher.find()
-            && quotaMatcher.find()
-            && epochIdMatcher.find()) {
-          String tier = tierMatcher.group(1);
-          int epochTxCount = Integer.parseInt(countMatcher.group(1));
-          int dailyQuota = Integer.parseInt(quotaMatcher.group(1));
-          String epochId = epochIdMatcher.group(1);
-          return Optional.of(new KarmaInfo(tier, epochTxCount, dailyQuota, epochId));
-        } else {
-          LOG.error(
-              "Failed to parse all required fields from Karma service response for user {}. Body: {}",
-              userAddress.toHexString(),
-              responseBody);
-          return Optional.empty();
-        }
+    } catch (StatusRuntimeException e) {
+      Status.Code code = e.getStatus().getCode();
+      if (code == Status.Code.NOT_FOUND) {
+        LOG.debug("User {} not found in karma service", userAddress.toHexString());
+        return Optional.empty();
+      } else if (code == Status.Code.DEADLINE_EXCEEDED) {
+        LOG.warn("Karma service timeout for user {}", userAddress.toHexString());
+        return Optional.empty();
       } else {
-        LOG.error(
-            "Karma service request for user {} failed with status code: {} and body: {}",
-            userAddress.toHexString(),
-            response.statusCode(),
-            response.body());
+        LOG.error("Karma service gRPC error for user {}: {}", 
+                 userAddress.toHexString(), e.getMessage(), e);
         return Optional.empty();
       }
-    } catch (IOException | InterruptedException e) {
-      LOG.error(
-          "Error calling Karma service for user {}: {}",
-          userAddress.toHexString(),
-          e.getMessage(),
-          e);
-      if (e instanceof InterruptedException) {
-        Thread.currentThread().interrupt();
-      }
-      return Optional.empty();
-    } catch (NumberFormatException e) {
-      LOG.error(
-          "Failed to parse numeric value from Karma service response for user {}: {}",
-          userAddress.toHexString(),
-          e.getMessage(),
-          e);
+    } catch (Exception e) {
+      LOG.error("Unexpected error calling karma service for user {}: {}", 
+               userAddress.toHexString(), e.getMessage(), e);
       return Optional.empty();
     }
   }
 
+  /**
+   * Validates a transaction against RLN requirements.
+   * 
+   * <p>This is the main validation entry point that orchestrates the complete
+   * RLN validation flow including deny list checks, proof verification,
+   * and quota enforcement.
+   * 
+   * <p><strong>Validation Steps:</strong>
+   * <ol>
+   *   <li>Check deny list status and premium gas bypass</li>
+   *   <li>Retrieve and validate RLN proof from cache</li>
+   *   <li>Verify cryptographic proof authenticity</li>
+   *   <li>Check user karma quota via gRPC service</li>
+   *   <li>Apply deny list penalties for quota violations</li>
+   * </ol>
+   * 
+   * @param transaction The transaction to validate
+   * @param isLocal Whether this is a local transaction
+   * @param hasPriority Whether this transaction has priority status
+   * @return Optional error message if validation fails, empty if valid
+   */
   @Override
   public Optional<String> validateTransaction(
       Transaction transaction, boolean isLocal, boolean hasPriority) {
@@ -536,8 +793,6 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         LOG.info("Removed expired deny list entry for sender: {}", sender.toHexString());
       } else {
         // User is actively denied. Check for premium gas.
-        // Using convenience accessor from LineaRlnValidatorConfiguration for
-        // premiumGasPriceThresholdWei
         long premiumThresholdWei = rlnConfig.premiumGasPriceThresholdWei();
         Wei effectiveGasPrice =
             transaction
@@ -573,7 +828,11 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
 
     // 2. RLN Proof Verification (via gRPC Cache)
     LOG.debug("Attempting to fetch RLN proof for txHash: {} from cache.", txHashString);
-    CachedProof proof = rlnProofCache.get(txHashString);
+    CachedProof proof;
+    synchronized(rlnProofCache) {
+      proof = rlnProofCache.get(txHashString);
+    }
+    
     long proofWaitStartTime = System.currentTimeMillis();
 
     while (proof == null
@@ -586,7 +845,9 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         LOG.warn("Proof polling interrupted for tx {}", txHashString, e);
         return Optional.of("Proof polling interrupted.");
       }
-      proof = rlnProofCache.get(txHashString);
+      synchronized(rlnProofCache) {
+        proof = rlnProofCache.get(txHashString);
+      }
     }
 
     if (proof == null) {
@@ -594,7 +855,6 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
           "RLN proof not found in cache after timeout for txHash: {}. Timeout: {}ms",
           txHashString,
           rlnConfig.rlnProofLocalWaitTimeoutMs());
-      // Do not add to deny list here, this is a missing proof, not a failed proof or quota issue.
       return Optional.of("RLN proof not found in cache after timeout.");
     }
     LOG.debug("RLN proof found in cache for txHash: {}", txHashString);
@@ -612,7 +872,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
               rlnVerifyingKeyBytes,
               Bytes.fromHexString(proof.proofBytesHex()).toArrayUnsafe(),
               publicInputsHexArray);
-    } catch (Exception e) { // Catch broader exceptions from JNI if any
+    } catch (Exception e) {
       LOG.error(
           "RLN JNI call to verifyRlnProof failed for tx {}: {}", txHashString, e.getMessage(), e);
       return Optional.of(RLN_VALIDATION_FAILED_MESSAGE + ": JNI exception - " + e.getMessage());
@@ -620,75 +880,54 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
 
     if (!rlnProofValid) {
       LOG.warn("RLN proof verification failed for tx: {}", txHashString);
-      // Potentially add to deny list if a specific policy dictates (e.g., repeated invalid proofs).
-      // For now, just reject.
       return Optional.of(RLN_VALIDATION_FAILED_MESSAGE + ": Proof invalid.");
     }
     LOG.info("RLN proof verified successfully for tx: {}", txHashString);
 
-    // 3. Karma / Quota Check (via Karma Service API)
-    if (rlnConfig.karmaServiceUrl().isPresent()) {
-      Optional<KarmaInfo> karmaInfoOpt = fetchKarmaInfoFromService(sender);
+    // 3. Karma / Quota Check (via gRPC Karma Service)
+    Optional<KarmaInfo> karmaInfoOpt = fetchKarmaInfoFromService(sender);
 
-      if (karmaInfoOpt.isEmpty()) {
-        LOG.warn(
-            "Failed to retrieve karma information for sender {} from Karma Service. Transaction {} rejected.",
-            sender.toHexString(),
-            txHashString);
-        // Fail-closed: if karma service is configured but fails to provide info, reject.
-        return Optional.of("Karma service interaction failed.");
-      }
+    if (karmaInfoOpt.isEmpty()) {
+      LOG.warn(
+          "Failed to retrieve karma information for sender {} from Karma Service. Transaction {} rejected.",
+          sender.toHexString(),
+          txHashString);
+      return Optional.of("Karma service interaction failed.");
+    }
 
-      KarmaInfo karmaInfo = karmaInfoOpt.get();
-      LOG.debug(
-          "Karma info for sender {}: Tier={}, EpochTxCount={}, DailyQuota={}, EpochId={}",
+    KarmaInfo karmaInfo = karmaInfoOpt.get();
+    LOG.debug(
+        "Karma info for sender {}: Tier={}, EpochTxCount={}, DailyQuota={}, EpochId={}, KarmaBalance={}",
+        sender.toHexString(),
+        karmaInfo.tier(),
+        karmaInfo.epochTxCount(),
+        karmaInfo.dailyQuota(),
+        karmaInfo.epochId(),
+        karmaInfo.karmaBalance());
+
+    String currentChainEpochId = getCurrentEpochIdentifier();
+    LOG.debug("Current chain epoch identifier: {}", currentChainEpochId);
+
+    if (karmaInfo.epochTxCount() >= karmaInfo.dailyQuota()) {
+      LOG.warn(
+          "User {} (Tier: {}) has exceeded their transaction quota for epoch {}. Count: {}, Quota: {}. Transaction {} rejected.",
+          sender.toHexString(),
+          karmaInfo.tier(),
+          karmaInfo.epochId(),
+          karmaInfo.epochTxCount(),
+          karmaInfo.dailyQuota(),
+          txHashString);
+      addToDenyList(sender);
+      return Optional.of(
+          "User transaction quota exceeded for current epoch. Added to deny list.");
+    } else {
+      LOG.info(
+          "User {} (Tier: {}) is within transaction quota. Count: {}, Quota: {}. Transaction {} allowed by karma check.",
           sender.toHexString(),
           karmaInfo.tier(),
           karmaInfo.epochTxCount(),
           karmaInfo.dailyQuota(),
-          karmaInfo.epochId());
-
-      String currentChainEpochId = getCurrentEpochIdentifier();
-      LOG.debug("Current chain epoch identifier: {}", currentChainEpochId);
-
-      // Note: The Karma service is the source of truth for epochTxCount relative to *its* reported
-      // epochId.
-      // If karmaInfo.epochId() does not match currentChainEpochId, the Karma service might need to
-      // handle epoch transitions itself.
-      // For the validator, we trust the counts and quota provided by the service for the user.
-      // A more advanced check might involve comparing karmaInfo.epochId() with currentChainEpochId
-      // and acting if they mismatch,
-      // but that depends on the agreed contract with the Karma service.
-      // For now, we directly use the epochTxCount and dailyQuota provided by the service.
-
-      if (karmaInfo.epochTxCount() >= karmaInfo.dailyQuota()) {
-        LOG.warn(
-            "User {} (Tier: {}) has exceeded their transaction quota for epoch {}. Count: {}, Quota: {}. Transaction {} rejected.",
-            sender.toHexString(),
-            karmaInfo.tier(),
-            karmaInfo.epochId(),
-            karmaInfo.epochTxCount(),
-            karmaInfo.dailyQuota(),
-            txHashString);
-        addToDenyList(sender); // Add to deny list due to quota exceeded
-        return Optional.of(
-            "User transaction quota exceeded for current epoch. Added to deny list.");
-      } else {
-        LOG.info(
-            "User {} (Tier: {}) is within transaction quota. Count: {}, Quota: {}. Transaction {} allowed by karma check.",
-            sender.toHexString(),
-            karmaInfo.tier(),
-            karmaInfo.epochTxCount(),
-            karmaInfo.dailyQuota(),
-            txHashString);
-        // No need to increment count locally, Karma service manages this.
-      }
-    } else {
-      LOG.info(
-          "Karma service URL not configured. Skipping karma/quota check for transaction {}.",
           txHashString);
-      // If Karma service is not configured, we proceed without a quota check.
-      // RLN proof verification itself is the primary gate.
     }
 
     LOG.info(
@@ -698,10 +937,20 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     return Optional.empty(); // Transaction is valid from RLN perspective
   }
 
+  /**
+   * Closes all resources including gRPC channels and scheduled executors.
+   * 
+   * <p>Ensures graceful shutdown of all background tasks and network connections.
+   * This method should be called when the validator is no longer needed to
+   * prevent resource leaks.
+   * 
+   * @throws IOException if there are issues during resource cleanup
+   */
   @Override
   public void close() throws IOException {
     LOG.info("Closing RlnVerifierValidator resources...");
-    // Re-enable gRPC client and scheduler shutdown
+    
+    // Shutdown gRPC channels
     if (proofServiceChannel != null && !proofServiceChannel.isShutdown()) {
       proofServiceChannel.shutdown();
       try {
@@ -713,6 +962,20 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         Thread.currentThread().interrupt();
       }
     }
+    
+    if (karmaServiceChannel != null && !karmaServiceChannel.isShutdown()) {
+      karmaServiceChannel.shutdown();
+      try {
+        if (!karmaServiceChannel.awaitTermination(5, TimeUnit.SECONDS)) {
+          karmaServiceChannel.shutdownNow();
+        }
+      } catch (InterruptedException e) {
+        karmaServiceChannel.shutdownNow();
+        Thread.currentThread().interrupt();
+      }
+    }
+    
+    // Shutdown schedulers
     if (denyListRefreshScheduler != null && !denyListRefreshScheduler.isShutdown()) {
       denyListRefreshScheduler.shutdownNow();
     }
@@ -722,23 +985,42 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     if (grpcReconnectionScheduler != null && !grpcReconnectionScheduler.isShutdown()) {
       grpcReconnectionScheduler.shutdownNow();
     }
+    
     LOG.info("RlnVerifierValidator resources closed.");
   }
 
-  // Test-only helper to access the proof cache
-  Optional<CachedProof> getProofFromCacheForTest(String txHash) {
-    return Optional.ofNullable(rlnProofCache.get(txHash));
+  // Test-only helper methods
+  
+  @VisibleForTesting
+  void addToDenyListForTest(Address user, Instant addedAt) {
+    denyList.put(user, addedAt);
+    saveDenyListToFile();
   }
 
-  // Test-only helper to add to the proof cache
+  @VisibleForTesting
+  boolean isDeniedForTest(Address user) {
+    Instant addedAt = denyList.get(user);
+    if (addedAt == null) return false;
+    long maxAgeMillis = TimeUnit.MINUTES.toMillis(rlnConfig.denyListEntryMaxAgeMinutes());
+    return (Instant.now().toEpochMilli() - addedAt.toEpochMilli()) < maxAgeMillis;
+  }
+
+  @VisibleForTesting
+  void loadDenyListFromFileForTest() {
+    this.loadDenyListFromFile();
+  }
+
+  @VisibleForTesting
+  Optional<CachedProof> getProofFromCacheForTest(String txHash) {
+    synchronized(rlnProofCache) {
+      return Optional.ofNullable(rlnProofCache.get(txHash));
+    }
+  }
+
+  @VisibleForTesting
   void addProofToCacheForTest(String txHash, CachedProof proof) {
-    if (rlnProofCache.size() < rlnConfig.rlnProofCacheMaxSize()) {
+    synchronized(rlnProofCache) {
       rlnProofCache.put(txHash, proof);
-    } else {
-      LOG.warn("RLN proof cache full during test add. Consider increasing size or evicting.");
-      // Potentially evict one to make space if really needed for a complex test scenario
-      // For now, simple put or log warning.
-      rlnProofCache.put(txHash, proof); // Allow overwrite or put if eviction not implemented here
     }
   }
 }

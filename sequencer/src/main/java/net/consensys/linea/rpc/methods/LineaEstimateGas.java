@@ -76,6 +76,15 @@ import org.hyperledger.besu.plugin.services.rpc.PluginRpcRequest;
 import org.hyperledger.besu.plugin.services.rpc.RpcMethodError;
 import org.hyperledger.besu.plugin.services.rpc.RpcResponseType;
 
+// Add gRPC imports for karma service
+import io.grpc.ManagedChannel;
+import io.grpc.ManagedChannelBuilder;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
+import net.consensys.linea.rln.proofs.grpc.GetKarmaRequest;
+import net.consensys.linea.rln.proofs.grpc.KarmaResponse;
+import net.consensys.linea.rln.proofs.grpc.KarmaServiceGrpc;
+
 @Slf4j
 public class LineaEstimateGas {
   @VisibleForTesting public static final SECPSignature FAKE_SIGNATURE_FOR_SIZE_CALCULATION;
@@ -117,6 +126,10 @@ public class LineaEstimateGas {
   private boolean allowZeroGasEstimationForGasless;
   private final Set<Address> denyListCache = ConcurrentHashMap.newKeySet();
   private ScheduledExecutorService denyListRefreshScheduler;
+
+  // Add karma service fields
+  private ManagedChannel karmaServiceChannel;
+  private KarmaServiceGrpc.KarmaServiceBlockingStub karmaServiceStub;
 
   public LineaEstimateGas(
       final BesuConfiguration besuConfiguration,
@@ -184,6 +197,9 @@ public class LineaEstimateGas {
               denyListPathOpt.get());
         }
       }
+      
+      // Initialize karma service if available
+      initializeKarmaService();
     } else {
       log.info("Gasless transaction features for linea_estimateGas are DISABLED.");
     }
@@ -283,18 +299,43 @@ public class LineaEstimateGas {
               create(premiumGasEstimate), create(baseFee), create(estimatedPriorityFee));
         }
 
-        // Not on deny list, and gasless mode is on for RPC
-        if (allowZeroGasEstimationForGasless) {
-          // User is eligible for gasless, return 0 for gas fields
-          // Actual gas will be calculated by backend, but user sees 0.
+        // Not on deny list - check if user has karma balance
+        Optional<KarmaInfo> karmaInfoOpt = fetchKarmaInfoFromService(sender);
+        
+        if (karmaInfoOpt.isPresent()) {
+          KarmaInfo karmaInfo = karmaInfoOpt.get();
+          boolean hasKarma = karmaInfo.karmaBalance() > 0;
+          
+          log.debug(
+              "[{}] Karma info for sender {}: Tier={}, KarmaBalance={}, HasKarma={}",
+              logId,
+              sender.toHexString(),
+              karmaInfo.tier(),
+              karmaInfo.karmaBalance(),
+              hasKarma);
+
+          if (hasKarma && allowZeroGasEstimationForGasless) {
+            // User has karma - eligible for gasless (0 gas estimation)
+            log.info(
+                "[{}] Sender {} has karma balance {} and is eligible for gasless estimation. Returning 0 gas.",
+                logId,
+                sender.toHexString(),
+                karmaInfo.karmaBalance());
+            return new Response(create(0L), create(Wei.ZERO), create(Wei.ZERO));
+          }
+          // User has no karma or gasless disabled - proceed to normal gas estimation below
           log.info(
-              "[{}] Sender {} is eligible for gasless estimation (not on deny list). Returning 0 gas.",
+              "[{}] Sender {} has karma balance {} but will receive standard gas estimation.",
+              logId,
+              sender.toHexString(),
+              karmaInfo.karmaBalance());
+        } else {
+          // Karma service unavailable or user not found - assume no karma, proceed to normal estimation
+          log.debug(
+              "[{}] Karma service unavailable or user {} not found. Proceeding with standard gas estimation.",
               logId,
               sender.toHexString());
-          return new Response(create(0L), create(Wei.ZERO), create(Wei.ZERO));
         }
-        // If !allowZeroGasEstimationForGasless, proceed to normal estimation below even if not on
-        // deny list.
       }
       // --- Linea Gasless Logic End ---
 
@@ -365,8 +406,6 @@ public class LineaEstimateGas {
         .log();
     return gasEstimation;
   }
-
-
 
   private Wei getEstimatedPriorityFee(
       final Transaction transaction,
@@ -614,8 +653,6 @@ public class LineaEstimateGas {
     }
   }
 
-
-
   // Method to stop the scheduler when the plugin stops (needs to be called from plugin's stop
   // lifecycle)
   public void stop() {
@@ -630,6 +667,112 @@ public class LineaEstimateGas {
         Thread.currentThread().interrupt();
       }
       log.info("Deny list refresh scheduler stopped.");
+    }
+    
+    // Close karma service gRPC channel
+    if (karmaServiceChannel != null && !karmaServiceChannel.isShutdown()) {
+      karmaServiceChannel.shutdown();
+      try {
+        if (!karmaServiceChannel.awaitTermination(5, TimeUnit.SECONDS)) {
+          karmaServiceChannel.shutdownNow();
+        }
+      } catch (InterruptedException e) {
+        karmaServiceChannel.shutdownNow();
+        Thread.currentThread().interrupt();
+      }
+      log.info("Karma service gRPC channel stopped.");
+    }
+  }
+
+  /**
+   * Initializes the gRPC client for the Karma Service.
+   * Used to check if user has karma balance > 0 for gasless eligibility.
+   */
+  private void initializeKarmaService() {
+    if (rpcConfiguration == null) {
+      log.warn("Cannot initialize karma service: rpcConfiguration is null");
+      return;
+    }
+    
+    try {
+      String karmaHost = rpcConfiguration.karmaServiceHost();
+      int karmaPort = rpcConfiguration.karmaServicePort();
+      boolean useTls = rpcConfiguration.karmaServiceUseTls();
+      long timeoutMs = rpcConfiguration.karmaServiceTimeoutMs();
+      
+      log.info("Initializing Karma Service client for target: {}:{}", karmaHost, karmaPort);
+      
+      ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(karmaHost, karmaPort);
+      
+      if (useTls) {
+        channelBuilder.useTransportSecurity();
+      } else {
+        channelBuilder.usePlaintext();
+      }
+      
+      this.karmaServiceChannel = channelBuilder.build();
+      this.karmaServiceStub = KarmaServiceGrpc.newBlockingStub(this.karmaServiceChannel)
+          .withDeadlineAfter(timeoutMs, TimeUnit.MILLISECONDS);
+      
+      log.info("Karma Service client initialized successfully for gasless transaction validation");
+      
+    } catch (Exception e) {
+      log.error("Failed to initialize Karma Service client: {}", e.getMessage(), e);
+      // Continue without karma service - will fall back to deny list only
+    }
+  }
+
+  /**
+   * Represents user karma information for quota validation.
+   */
+  private record KarmaInfo(String tier, int epochTxCount, int dailyQuota, String epochId, long karmaBalance) {}
+
+  /**
+   * Fetches karma information for a user via gRPC Karma Service.
+   * Used only to check if user has karma balance > 0 for gasless eligibility.
+   */
+  private Optional<KarmaInfo> fetchKarmaInfoFromService(Address userAddress) {
+    if (karmaServiceStub == null) {
+      log.debug("Karma service not configured. Cannot fetch karma info for {}", userAddress.toHexString());
+      return Optional.empty();
+    }
+
+    GetKarmaRequest request = GetKarmaRequest.newBuilder()
+        .setUserAddress(userAddress.toHexString())
+        .build();
+
+    try {
+      log.debug("Fetching karma info for user {} via gRPC", userAddress.toHexString());
+      KarmaResponse response = karmaServiceStub.getKarma(request);
+
+      log.debug("Karma service response for {}: tier={}, karmaBalance={}",
+               userAddress.toHexString(), response.getTier(), response.getKarmaBalance());
+
+      return Optional.of(new KarmaInfo(
+          response.getTier(),
+          response.getEpochTxCount(),
+          response.getDailyQuota(),
+          response.getEpochId(),
+          response.getKarmaBalance()
+      ));
+
+    } catch (StatusRuntimeException e) {
+      Status.Code code = e.getStatus().getCode();
+      if (code == Status.Code.NOT_FOUND) {
+        log.debug("User {} not found in karma service", userAddress.toHexString());
+        return Optional.empty();
+      } else if (code == Status.Code.DEADLINE_EXCEEDED) {
+        log.warn("Karma service timeout for user {}", userAddress.toHexString());
+        return Optional.empty();
+      } else {
+        log.error("Karma service gRPC error for user {}: {}", 
+                 userAddress.toHexString(), e.getMessage(), e);
+        return Optional.empty();
+      }
+    } catch (Exception e) {
+      log.error("Unexpected error calling karma service for user {}: {}", 
+               userAddress.toHexString(), e.getMessage(), e);
+      return Optional.empty();
     }
   }
 }

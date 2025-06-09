@@ -32,7 +32,12 @@ class LineaRlnValidatorCliOptionsTest {
         actualConfig.rlnProofStreamRetryIntervalMs());
     assertEquals(
         defaultConfig.rlnProofLocalWaitTimeoutMs(), actualConfig.rlnProofLocalWaitTimeoutMs());
-    assertEquals(defaultConfig.karmaServiceUrl(), actualConfig.karmaServiceUrl());
+    assertEquals(defaultConfig.karmaServiceHost(), actualConfig.karmaServiceHost());
+    assertEquals(defaultConfig.karmaServicePort(), actualConfig.karmaServicePort());
+    assertEquals(defaultConfig.karmaServiceUseTls(), actualConfig.karmaServiceUseTls());
+    assertEquals(defaultConfig.karmaServiceTimeoutMs(), actualConfig.karmaServiceTimeoutMs());
+    assertEquals(defaultConfig.exponentialBackoffEnabled(), actualConfig.exponentialBackoffEnabled());
+    assertEquals(defaultConfig.maxBackoffDelayMs(), actualConfig.maxBackoffDelayMs());
     assertEquals(defaultConfig.defaultEpochForQuota(), actualConfig.defaultEpochForQuota());
     assertEquals(defaultConfig.rlnJniLibPath(), actualConfig.rlnJniLibPath());
 
@@ -66,7 +71,12 @@ class LineaRlnValidatorCliOptionsTest {
       "--plugin-linea-rln-proof-stream-retries=10",
       "--plugin-linea-rln-proof-stream-retry-interval-ms=10000",
       "--plugin-linea-rln-proof-local-wait-timeout-ms=200",
-      "--plugin-linea-rln-karma-service-url=http://custom.karma/api",
+      "--plugin-linea-rln-karma-service-host=custom.karma",
+      "--plugin-linea-rln-karma-service-port=8080",
+      "--plugin-linea-rln-karma-service-use-tls=true",
+      "--plugin-linea-rln-karma-service-timeout-ms=10000",
+      "--plugin-linea-rln-exponential-backoff-enabled=false",
+      "--plugin-linea-rln-max-backoff-delay-ms=120000",
       "--plugin-linea-rln-default-epoch-for-quota=BLOCK_NUMBER_100",
       "--plugin-linea-rln-jni-lib-path=/custom/lib/rln.so"
       // Shared options Temporarily Removed for diagnostics
@@ -89,7 +99,12 @@ class LineaRlnValidatorCliOptionsTest {
     assertEquals(10, actualConfig.rlnProofStreamRetries());
     assertEquals(10000L, actualConfig.rlnProofStreamRetryIntervalMs());
     assertEquals(200L, actualConfig.rlnProofLocalWaitTimeoutMs());
-    assertEquals(Optional.of("http://custom.karma/api"), actualConfig.karmaServiceUrl());
+    assertEquals("custom.karma", actualConfig.karmaServiceHost());
+    assertEquals(8080, actualConfig.karmaServicePort());
+    assertTrue(actualConfig.karmaServiceUseTls());
+    assertEquals(10000L, actualConfig.karmaServiceTimeoutMs());
+    assertFalse(actualConfig.exponentialBackoffEnabled());
+    assertEquals(120000L, actualConfig.maxBackoffDelayMs());
     assertEquals("BLOCK_NUMBER_100", actualConfig.defaultEpochForQuota());
     assertEquals(Optional.of("/custom/lib/rln.so"), actualConfig.rlnJniLibPath());
 

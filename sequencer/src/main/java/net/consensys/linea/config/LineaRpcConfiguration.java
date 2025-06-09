@@ -42,4 +42,13 @@ public class LineaRpcConfiguration implements LineaOptionsConfiguration {
   @Builder.Default private final boolean allowZeroGasEstimationForGasless = false;
 
   @NonNull private final LineaSharedGaslessConfiguration sharedGaslessConfig;
+
+  // Karma service configuration for gasless transaction quota validation
+  @Builder.Default private final String karmaServiceHost = "localhost";
+
+  @Builder.Default private final int karmaServicePort = 50052;
+
+  @Builder.Default private final boolean karmaServiceUseTls = false;
+
+  @Builder.Default private final long karmaServiceTimeoutMs = 5000L;
 }

@@ -21,8 +21,28 @@ message StreamProofsRequest {
   string client_id = 1; // Identifier for the client subscribing to the stream
 }
 
+// Karma-related messages
+message GetKarmaRequest {
+  string user_address = 1; // Hex-encoded user address
+}
+
+message KarmaResponse {
+  string user_address = 1;  // Hex-encoded user address
+  string tier = 2;          // User's karma tier (e.g., "Basic", "Active", "Regular")
+  int32 epoch_tx_count = 3; // Number of transactions used in current epoch
+  int32 daily_quota = 4;    // Daily transaction quota for this tier
+  string epoch_id = 5;      // Current epoch identifier
+  int64 karma_balance = 6;  // User's karma balance
+}
+
 // Service definition for streaming RLN proofs
 service RlnProofService {
   // Server-streaming RPC for receiving RLN proofs as they become available
   rpc StreamProofs(StreamProofsRequest) returns (stream ProofMessage);
+}
+
+// Service definition for Karma information
+service KarmaService {
+  // Unary RPC for retrieving user's karma information
+  rpc GetKarma(GetKarmaRequest) returns (KarmaResponse);
 } 

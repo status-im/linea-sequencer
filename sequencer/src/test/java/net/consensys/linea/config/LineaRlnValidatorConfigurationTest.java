@@ -37,7 +37,12 @@ class LineaRlnValidatorConfigurationTest {
     assertEquals(
         LineaSharedGaslessConfiguration.DEFAULT_DENY_LIST_ENTRY_MAX_AGE_MINUTES,
         defaultConfig.denyListEntryMaxAgeMinutes());
-    assertEquals(Optional.empty(), defaultConfig.karmaServiceUrl());
+    assertEquals("localhost", defaultConfig.karmaServiceHost());
+    assertEquals(50052, defaultConfig.karmaServicePort());
+    assertFalse(defaultConfig.karmaServiceUseTls());
+    assertEquals(5000L, defaultConfig.karmaServiceTimeoutMs());
+    assertTrue(defaultConfig.exponentialBackoffEnabled());
+    assertEquals(60000L, defaultConfig.maxBackoffDelayMs());
     assertEquals("TIMESTAMP_1H", defaultConfig.defaultEpochForQuota());
     assertEquals(Optional.empty(), defaultConfig.rlnJniLibPath());
   }
@@ -66,7 +71,12 @@ class LineaRlnValidatorConfigurationTest {
             2000L,
             100L,
             sharedConfig,
-            Optional.of("karma_url"),
+            "karma_host",
+            8080,
+            false,
+            5000L,
+            true,
+            60000L,
             "TIMESTAMP_1H",
             Optional.of("/jni/path"));
 
@@ -85,7 +95,12 @@ class LineaRlnValidatorConfigurationTest {
     assertEquals(customRefreshSeconds, config.denyListRefreshSeconds());
     assertEquals(customPremiumGwei * 1_000_000_000L, config.premiumGasPriceThresholdWei());
     assertEquals(customMaxAgeMinutes, config.denyListEntryMaxAgeMinutes());
-    assertEquals(Optional.of("karma_url"), config.karmaServiceUrl());
+    assertEquals("karma_host", config.karmaServiceHost());
+    assertEquals(8080, config.karmaServicePort());
+    assertFalse(config.karmaServiceUseTls());
+    assertEquals(5000L, config.karmaServiceTimeoutMs());
+    assertTrue(config.exponentialBackoffEnabled());
+    assertEquals(60000L, config.maxBackoffDelayMs());
     assertEquals("TIMESTAMP_1H", config.defaultEpochForQuota());
     assertEquals(Optional.of("/jni/path"), config.rlnJniLibPath());
   }
@@ -114,7 +129,12 @@ class LineaRlnValidatorConfigurationTest {
             0L,
             0L,
             sharedConfig,
-            Optional.empty(),
+            "localhost",
+            50052,
+            false,
+            5000L,
+            true,
+            60000L,
             "",
             Optional.empty());
     assertEquals(expectedPath, config.denyListPath());

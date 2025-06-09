@@ -20,8 +20,12 @@ import net.consensys.linea.plugins.LineaOptionsConfiguration;
  *     validation (in ms).
  * @param sharedGaslessConfig Shared configuration including the deny list path and premium gas
  *     threshold.
- * @param karmaServiceUrl Optional URL to an HTTP service that provides user karma/tier, quota, and
- *     epoch usage.
+ * @param karmaServiceHost Hostname for the Karma gRPC service.
+ * @param karmaServicePort Port for the Karma gRPC service.
+ * @param karmaServiceUseTls Whether to use TLS for gRPC connection to karma service.
+ * @param karmaServiceTimeoutMs Timeout for karma service requests in milliseconds.
+ * @param exponentialBackoffEnabled Whether to use exponential backoff for gRPC reconnections.
+ * @param maxBackoffDelayMs Maximum backoff delay for gRPC reconnections in milliseconds.
  * @param defaultEpochForQuota Default epoch identifier.
  * @param rlnJniLibPath Optional explicit path to the rln_jni native library.
  */
@@ -37,7 +41,12 @@ public record LineaRlnValidatorConfiguration(
     long rlnProofStreamRetryIntervalMs,
     long rlnProofLocalWaitTimeoutMs,
     LineaSharedGaslessConfiguration sharedGaslessConfig,
-    Optional<String> karmaServiceUrl, // This is for HTTP service
+    String karmaServiceHost,
+    int karmaServicePort,
+    boolean karmaServiceUseTls,
+    long karmaServiceTimeoutMs,
+    boolean exponentialBackoffEnabled,
+    long maxBackoffDelayMs,
     String defaultEpochForQuota,
     Optional<String> rlnJniLibPath)
     implements LineaOptionsConfiguration {
@@ -55,7 +64,12 @@ public record LineaRlnValidatorConfiguration(
           5000L, // rlnProofStreamRetryIntervalMs (5 seconds)
           200L, // rlnProofLocalWaitTimeoutMs (200ms)
           LineaSharedGaslessConfiguration.V1_DEFAULT,
-          Optional.empty(), // karmaServiceUrl
+          "localhost", // karmaServiceHost
+          50052, // karmaServicePort
+          false, // karmaServiceUseTls
+          5000L, // karmaServiceTimeoutMs (5 seconds)
+          true, // exponentialBackoffEnabled
+          60000L, // maxBackoffDelayMs (60 seconds)
           "TIMESTAMP_1H", // defaultEpochForQuota
           Optional.empty() // rlnJniLibPath
           );
