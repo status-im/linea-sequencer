@@ -28,8 +28,11 @@ import net.consensys.linea.config.LineaProfitabilityCliOptions;
 import net.consensys.linea.config.LineaProfitabilityConfiguration;
 import net.consensys.linea.config.LineaRejectedTxReportingCliOptions;
 import net.consensys.linea.config.LineaRejectedTxReportingConfiguration;
+import net.consensys.linea.config.LineaRlnValidatorCliOptions;
+import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaRpcCliOptions;
 import net.consensys.linea.config.LineaRpcConfiguration;
+import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.config.LineaTracerCliOptions;
 import net.consensys.linea.config.LineaTracerConfiguration;
 import net.consensys.linea.config.LineaTransactionPoolValidatorCliOptions;
@@ -85,23 +88,54 @@ public abstract class AbstractLineaSharedPrivateOptionsPlugin
   public Map<String, LineaOptionsPluginConfiguration> getLineaPluginConfigMap() {
     final var configMap = new HashMap<>(super.getLineaPluginConfigMap());
 
+    var tsCliOptions = LineaTransactionSelectorCliOptions.create();
     configMap.put(
         LineaTransactionSelectorCliOptions.CONFIG_KEY,
-        LineaTransactionSelectorCliOptions.create().asPluginConfig());
+        new LineaOptionsPluginConfiguration(tsCliOptions, () -> tsCliOptions.toDomainObject()));
+
+    var tpvCliOptions = LineaTransactionPoolValidatorCliOptions.create();
     configMap.put(
         LineaTransactionPoolValidatorCliOptions.CONFIG_KEY,
-        LineaTransactionPoolValidatorCliOptions.create().asPluginConfig());
-    configMap.put(LineaRpcCliOptions.CONFIG_KEY, LineaRpcCliOptions.create().asPluginConfig());
+        new LineaOptionsPluginConfiguration(tpvCliOptions, () -> tpvCliOptions.toDomainObject()));
+
+    var rpcCliOptions = LineaRpcCliOptions.create();
+    configMap.put(
+        LineaRpcCliOptions.CONFIG_KEY,
+        new LineaOptionsPluginConfiguration(
+            rpcCliOptions,
+            () -> {
+              LineaSharedGaslessConfiguration sharedConf = sharedGaslessConfiguration();
+              return rpcCliOptions.toDomainObject(sharedConf);
+            }));
+
+    var profitabilityCliOptions = LineaProfitabilityCliOptions.create();
     configMap.put(
         LineaProfitabilityCliOptions.CONFIG_KEY,
-        LineaProfitabilityCliOptions.create().asPluginConfig());
+        new LineaOptionsPluginConfiguration(
+            profitabilityCliOptions, () -> profitabilityCliOptions.toDomainObject()));
+
+    var tracerCliOptions = LineaTracerCliOptions.create();
     configMap.put(
-        LineaTracerCliOptions.CONFIG_KEY, LineaTracerCliOptions.create().asPluginConfig());
+        LineaTracerCliOptions.CONFIG_KEY,
+        new LineaOptionsPluginConfiguration(
+            tracerCliOptions, () -> tracerCliOptions.toDomainObject()));
+
+    var rtrCliOptions = LineaRejectedTxReportingCliOptions.create();
     configMap.put(
         LineaRejectedTxReportingCliOptions.CONFIG_KEY,
-        LineaRejectedTxReportingCliOptions.create().asPluginConfig());
+        new LineaOptionsPluginConfiguration(rtrCliOptions, () -> rtrCliOptions.toDomainObject()));
+
+    var bundleCliOptions = LineaBundleCliOptions.create();
     configMap.put(
-        LineaBundleCliOptions.CONFIG_KEY, LineaBundleCliOptions.create().asPluginConfig());
+        LineaBundleCliOptions.CONFIG_KEY,
+        new LineaOptionsPluginConfiguration(
+            bundleCliOptions, () -> bundleCliOptions.toDomainObject()));
+
+    var rlnCliOptions = LineaRlnValidatorCliOptions.create();
+    configMap.put(
+        LineaRlnValidatorCliOptions.CONFIG_KEY,
+        new LineaOptionsPluginConfiguration(rlnCliOptions, () -> rlnCliOptions.toDomainObject()));
+
     return configMap;
   }
 
@@ -138,6 +172,22 @@ public abstract class AbstractLineaSharedPrivateOptionsPlugin
   public LineaBundleConfiguration bundleConfiguration() {
     return (LineaBundleConfiguration)
         getConfigurationByKey(LineaBundleCliOptions.CONFIG_KEY).optionsConfig();
+  }
+
+  public LineaRlnValidatorConfiguration rlnValidatorConfiguration() {
+    return (LineaRlnValidatorConfiguration)
+        getConfigurationByKey(LineaRlnValidatorCliOptions.CONFIG_KEY).optionsConfig();
+  }
+
+  public LineaSharedGaslessConfiguration sharedGaslessConfiguration() {
+    // Shared gasless configuration is now embedded in RLN validator configuration
+    LineaRlnValidatorConfiguration rlnConfig = rlnValidatorConfiguration();
+    if (rlnConfig != null && rlnConfig.sharedGaslessConfig() != null) {
+      return rlnConfig.sharedGaslessConfig();
+    }
+
+    // Fallback to default configuration if RLN is not configured
+    return LineaSharedGaslessConfiguration.V1_DEFAULT;
   }
 
   @Override

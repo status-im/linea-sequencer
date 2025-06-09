@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package net.consensys.linea.rln.proofs.grpc;
+
+option java_package = "net.consensys.linea.rln.proofs.grpc";
+option java_multiple_files = true;
+
+// Message structure for an RLN proof and its associated public inputs
+message ProofMessage {
+  string tx_hash = 1;         // Transaction hash this proof is for
+  string proof_bytes_hex = 2; // The RLN proof itself, hex encoded
+  string share_x_hex = 3;     // Public input: x-coordinate of the secret share, hex encoded
+  string share_y_hex = 4;     // Public input: y-coordinate of the secret share, hex encoded
+  string epoch_hex = 5;       // Public input: epoch identifier, hex encoded
+  string root_hex = 6;        // Public input: Merkle tree root, hex encoded
+  string nullifier_hex = 7;   // Public input: nullifier, hex encoded
+}
+
+// Request message for subscribing to the proof stream
+message StreamProofsRequest {
+  string client_id = 1; // Identifier for the client subscribing to the stream
+}
+
+// Karma-related messages
+message GetKarmaRequest {
+  string user_address = 1; // Hex-encoded user address
+}
+
+message KarmaResponse {
+  string user_address = 1;  // Hex-encoded user address
+  string tier = 2;          // User's karma tier (e.g., "Basic", "Active", "Regular")
+  int32 epoch_tx_count = 3; // Number of transactions used in current epoch
+  int32 daily_quota = 4;    // Daily transaction quota for this tier
+  string epoch_id = 5;      // Current epoch identifier
+  int64 karma_balance = 6;  // User's karma balance
+}
+
+// Service definition for streaming RLN proofs
+service RlnProofService {
+  // Server-streaming RPC for receiving RLN proofs as they become available
+  rpc StreamProofs(StreamProofsRequest) returns (stream ProofMessage);
+}
+
+// Service definition for Karma information
+service KarmaService {
+  // Unary RPC for retrieving user's karma information
+  rpc GetKarma(GetKarmaRequest) returns (KarmaResponse);
+} 
