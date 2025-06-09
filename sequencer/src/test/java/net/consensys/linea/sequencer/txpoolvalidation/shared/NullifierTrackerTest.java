@@ -114,14 +114,13 @@ class NullifierTrackerTest {
 
     // Then: File should contain epoch information
     List<String> lines = Files.readAllLines(nullifierFile);
-    
+
     // Find data lines (skip comments)
-    List<String> dataLines = lines.stream()
-        .filter(line -> !line.startsWith("#") && !line.trim().isEmpty())
-        .toList();
+    List<String> dataLines =
+        lines.stream().filter(line -> !line.startsWith("#") && !line.trim().isEmpty()).toList();
 
     assertEquals(2, dataLines.size(), "Should have 2 nullifier entries");
-    
+
     // Verify format: nullifier,timestamp,epoch
     for (String line : dataLines) {
       String[] parts = line.split(",");
@@ -139,7 +138,8 @@ class NullifierTrackerTest {
     tracker.close();
 
     // When: Create new tracker instance
-    NullifierTracker newTracker = new NullifierTracker("TestService", nullifierFile.toString(), 24L);
+    NullifierTracker newTracker =
+        new NullifierTracker("TestService", nullifierFile.toString(), 24L);
 
     // Then: Should preserve epoch scoping
     assertTrue(newTracker.isNullifierUsed("0x1111", "epoch_A"));
@@ -154,16 +154,16 @@ class NullifierTrackerTest {
   void testInvalidInputs_shouldHandleGracefully() {
     // Test null nullifier
     assertFalse(tracker.checkAndMarkNullifier(null, "epoch1"));
-    
+
     // Test empty nullifier
     assertFalse(tracker.checkAndMarkNullifier("", "epoch1"));
-    
+
     // Test null epoch
     assertFalse(tracker.checkAndMarkNullifier("0x1234", null));
-    
+
     // Test empty epoch
     assertFalse(tracker.checkAndMarkNullifier("0x1234", ""));
-    
+
     // Test isNullifierUsed with invalid inputs
     assertFalse(tracker.isNullifierUsed(null, "epoch1"));
     assertFalse(tracker.isNullifierUsed("0x1234", null));
@@ -176,34 +176,36 @@ class NullifierTrackerTest {
     // Test concurrent access to prevent race conditions
     String nullifier = "0xdeadbeef";
     String epoch = "concurrent_test";
-    
+
     Thread[] threads = new Thread[10];
     boolean[] results = new boolean[10];
-    
+
     // Start multiple threads trying to use same nullifier
     for (int i = 0; i < 10; i++) {
       final int index = i;
-      threads[i] = new Thread(() -> {
-        results[index] = tracker.checkAndMarkNullifier(nullifier, epoch);
-      });
+      threads[i] =
+          new Thread(
+              () -> {
+                results[index] = tracker.checkAndMarkNullifier(nullifier, epoch);
+              });
     }
-    
+
     // Start all threads
     for (Thread thread : threads) {
       thread.start();
     }
-    
+
     // Wait for completion
     for (Thread thread : threads) {
       thread.join();
     }
-    
+
     // Exactly one should succeed
     int successCount = 0;
     for (boolean result : results) {
       if (result) successCount++;
     }
-    
+
     assertEquals(1, successCount, "Exactly one thread should succeed with concurrent access");
   }
-} 
+}

@@ -96,14 +96,17 @@ public class SharedServiceManager implements Closeable {
 
       // Initialize NullifierTracker
       if (rlnConfig.sharedGaslessConfig() != null) {
-        String nullifierStoragePath = rlnConfig.sharedGaslessConfig().denyListPath().replace("deny_list.txt", "nullifiers.txt");
-        long nullifierExpiryHours = rlnConfig.denyListEntryMaxAgeMinutes() / 60 * 2; // 2x deny list expiry for safety
-        
+        String nullifierStoragePath =
+            rlnConfig
+                .sharedGaslessConfig()
+                .denyListPath()
+                .replace("deny_list.txt", "nullifiers.txt");
+        long nullifierExpiryHours =
+            rlnConfig.denyListEntryMaxAgeMinutes() / 60 * 2; // 2x deny list expiry for safety
+
         this.nullifierTracker =
             new NullifierTracker(
-                "SharedServiceManager", 
-                nullifierStoragePath, 
-                nullifierExpiryHours);
+                "SharedServiceManager", nullifierStoragePath, nullifierExpiryHours);
         LOG.info("NullifierTracker initialized successfully");
       } else {
         LOG.warn("Cannot initialize NullifierTracker: sharedGaslessConfig is null");

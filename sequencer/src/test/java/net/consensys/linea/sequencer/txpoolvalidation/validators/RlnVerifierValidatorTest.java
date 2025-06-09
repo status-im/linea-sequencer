@@ -551,14 +551,16 @@ class RlnVerifierValidatorTest {
     when(mockTransaction.getMaxFeePerGas()).thenReturn(Optional.empty());
 
     // Mock the blockchain service to generate the test epoch that matches the proof
-    // The test proof expects epoch: "0x09a6ed7f807775ba43e63fbba747a7f0122aa3fac4a05b3392aea03eecdd1128"
+    // The test proof expects epoch:
+    // "0x09a6ed7f807775ba43e63fbba747a7f0122aa3fac4a05b3392aea03eecdd1128"
     // We need to configure the mock to generate this exact epoch
-    
+
     // Strategy: Override the epoch generation in RlnConfig to return the test epoch
     String testEpoch = proofEpoch; // Use the epoch from the test proof
     when(rlnConfig.defaultEpochForQuota()).thenReturn("TEST"); // Use a special test mode
-    
-    // Mock the blockchain header to generate consistent epoch - we'll override getCurrentEpochIdentifier for this test
+
+    // Mock the blockchain header to generate consistent epoch - we'll override
+    // getCurrentEpochIdentifier for this test
     when(mockBlockHeader.getTimestamp()).thenReturn(1609459200L); // 2021-01-01 00:00:00 UTC
     when(mockBlockHeader.getNumber()).thenReturn(1L);
 
@@ -741,7 +743,7 @@ class RlnVerifierValidatorTest {
             "0xroot",
             "0xnullifier",
             Instant.now()));
-    
+
     // Configure for TEST mode to match epoch
     when(rlnConfig.defaultEpochForQuota()).thenReturn("TEST");
 
@@ -880,7 +882,8 @@ class RlnVerifierValidatorTest {
 
   @Test
   void testValidateTransaction_karmaServiceDown_shouldReject() {
-    System.out.println("RlnVerifierValidatorTest: Starting testValidateTransaction_karmaServiceDown");
+    System.out.println(
+        "RlnVerifierValidatorTest: Starting testValidateTransaction_karmaServiceDown");
 
     // Simpler test: Test the circuit breaker logic directly without mocking complex JNI calls
     // We'll create a transaction that hits the karma service check by skipping earlier validations
@@ -907,11 +910,13 @@ class RlnVerifierValidatorTest {
     String txHash = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     Transaction mockTransaction = mock(Transaction.class);
     when(mockTransaction.getSender()).thenReturn(sender);
-    when(mockTransaction.getHash()).thenReturn(org.hyperledger.besu.datatypes.Hash.fromHexString(txHash));
-    when(mockTransaction.getGasPrice()).thenAnswer(invocation -> Optional.of(Wei.of(1_000_000_000L)));
+    when(mockTransaction.getHash())
+        .thenReturn(org.hyperledger.besu.datatypes.Hash.fromHexString(txHash));
+    when(mockTransaction.getGasPrice())
+        .thenAnswer(invocation -> Optional.of(Wei.of(1_000_000_000L)));
     when(mockTransaction.getMaxFeePerGas()).thenReturn(Optional.empty());
 
-    // Use a valid proof from our test data to pass proof verification 
+    // Use a valid proof from our test data to pass proof verification
     if (jniTestFirstValidProofEntry != null) {
       JSONObject publicInputs = jniTestFirstValidProofEntry.getJSONObject("public_inputs");
       testValidator.addProofToCacheForTest(
@@ -924,7 +929,7 @@ class RlnVerifierValidatorTest {
               publicInputs.getString("root"),
               publicInputs.getString("nullifier"),
               Instant.now()));
-      
+
       // Configure for TEST mode to match the test proof's epoch
       when(rlnConfig.defaultEpochForQuota()).thenReturn("TEST");
     }
@@ -946,6 +951,7 @@ class RlnVerifierValidatorTest {
           "Should mention karma service unavailable, but got: " + result.get());
     }
 
-    System.out.println("RlnVerifierValidatorTest: Finished testValidateTransaction_karmaServiceDown");
+    System.out.println(
+        "RlnVerifierValidatorTest: Finished testValidateTransaction_karmaServiceDown");
   }
 }

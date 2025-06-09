@@ -48,10 +48,10 @@ import org.slf4j.LoggerFactory;
  *
  * <p><strong>Security Critical:</strong> This component is essential for RLN security. Nullifier
  * reuse within the same epoch would completely compromise rate limiting guarantees.
- * 
- * <p><strong>Epoch Scoping:</strong> Nullifiers are scoped by epoch, meaning the same nullifier
- * can be reused across different epochs but not within the same epoch. This is fundamental to
- * RLN semantics where users get fresh nullifiers each epoch.
+ *
+ * <p><strong>Epoch Scoping:</strong> Nullifiers are scoped by epoch, meaning the same nullifier can
+ * be reused across different epochs but not within the same epoch. This is fundamental to RLN
+ * semantics where users get fresh nullifiers each epoch.
  */
 public class NullifierTracker implements Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(NullifierTracker.class);
@@ -69,9 +69,7 @@ public class NullifierTracker implements Closeable {
   private final AtomicLong nullifierHits = new AtomicLong(0);
   private final AtomicLong cleanupOperations = new AtomicLong(0);
 
-  /**
-   * Represents a tracked nullifier with its metadata.
-   */
+  /** Represents a tracked nullifier with its metadata. */
   private record NullifierData(String nullifier, String epochId, Instant timestamp) {}
 
   /**
@@ -102,31 +100,29 @@ public class NullifierTracker implements Closeable {
     scheduleCleanupTasks();
 
     LOG.info(
-        "{}: Nullifier tracker initialized with {} nullifiers",
-        serviceName,
-        usedNullifiers.size());
+        "{}: Nullifier tracker initialized with {} nullifiers", serviceName, usedNullifiers.size());
   }
 
   /**
    * Checks if a nullifier has been used before within the given epoch and marks it as used if new.
    *
-   * <p><strong>Thread-safe and atomic:</strong> This operation is atomic to prevent race
-   * conditions where multiple transactions with the same nullifier could pass validation
-   * simultaneously.
-   * 
-   * <p><strong>Epoch Scoping:</strong> Nullifiers are scoped by epoch. The same nullifier
-   * can be reused across different epochs but not within the same epoch.
+   * <p><strong>Thread-safe and atomic:</strong> This operation is atomic to prevent race conditions
+   * where multiple transactions with the same nullifier could pass validation simultaneously.
+   *
+   * <p><strong>Epoch Scoping:</strong> Nullifiers are scoped by epoch. The same nullifier can be
+   * reused across different epochs but not within the same epoch.
    *
    * @param nullifierHex Hex-encoded nullifier to check/register
    * @param epochId Current epoch identifier for scoping
-   * @return true if nullifier is new within this epoch (transaction should be allowed), false if already used in this epoch
+   * @return true if nullifier is new within this epoch (transaction should be allowed), false if
+   *     already used in this epoch
    */
   public boolean checkAndMarkNullifier(String nullifierHex, String epochId) {
     if (nullifierHex == null || nullifierHex.trim().isEmpty()) {
       LOG.warn("{}: Invalid nullifier provided: {}", serviceName, nullifierHex);
       return false;
     }
-    
+
     if (epochId == null || epochId.trim().isEmpty()) {
       LOG.warn("{}: Invalid epoch ID provided: {}", serviceName, epochId);
       return false;
@@ -134,10 +130,10 @@ public class NullifierTracker implements Closeable {
 
     String normalizedNullifier = nullifierHex.toLowerCase().trim();
     String normalizedEpochId = epochId.trim();
-    
+
     // CRITICAL FIX: Create epoch-scoped key for proper nullifier tracking
     String epochScopedKey = normalizedNullifier + ":" + normalizedEpochId;
-    
+
     Instant now = Instant.now();
     NullifierData nullifierData = new NullifierData(normalizedNullifier, normalizedEpochId, now);
 
@@ -178,17 +174,17 @@ public class NullifierTracker implements Closeable {
    * @return true if nullifier has been used within this epoch, false if new
    */
   public boolean isNullifierUsed(String nullifierHex, String epochId) {
-    if (nullifierHex == null || nullifierHex.trim().isEmpty() || 
-        epochId == null || epochId.trim().isEmpty()) {
+    if (nullifierHex == null
+        || nullifierHex.trim().isEmpty()
+        || epochId == null
+        || epochId.trim().isEmpty()) {
       return false;
     }
     String epochScopedKey = nullifierHex.toLowerCase().trim() + ":" + epochId.trim();
     return usedNullifiers.containsKey(epochScopedKey);
   }
 
-  /**
-   * Loads existing nullifiers from persistent storage on startup.
-   */
+  /** Loads existing nullifiers from persistent storage on startup. */
   private void loadNullifiersFromStorage() {
     if (!Files.exists(nullifierStorageFile)) {
       LOG.info("{}: No existing nullifier storage file found, starting fresh", serviceName);
@@ -211,7 +207,7 @@ public class NullifierTracker implements Closeable {
           String epochId = parts[2].trim(); // epoch is the third field
           try {
             Instant timestamp = Instant.parse(parts[1].trim());
-            
+
             if (timestamp.isAfter(cutoff)) {
               // CRITICAL FIX: Use epoch-scoped key for loading
               String epochScopedKey = nullifier + ":" + epochId;
@@ -236,14 +232,11 @@ public class NullifierTracker implements Closeable {
           expired);
 
     } catch (IOException e) {
-      LOG.error(
-          "{}: Failed to load nullifiers from storage: {}", serviceName, e.getMessage(), e);
+      LOG.error("{}: Failed to load nullifiers from storage: {}", serviceName, e.getMessage(), e);
     }
   }
 
-  /**
-   * Persists a new nullifier to storage file atomically.
-   */
+  /** Persists a new nullifier to storage file atomically. */
   private void persistNullifierToStorage(String nullifier, String epochId, Instant timestamp) {
     try {
       // Ensure parent directory exists
@@ -258,27 +251,21 @@ public class NullifierTracker implements Closeable {
           StandardOpenOption.APPEND);
 
     } catch (IOException e) {
-      LOG.error(
-          "{}: Failed to persist nullifier to storage: {}", serviceName, e.getMessage(), e);
+      LOG.error("{}: Failed to persist nullifier to storage: {}", serviceName, e.getMessage(), e);
       // Don't throw - this is not fatal for immediate operation but log for investigation
     }
   }
 
-  /**
-   * Schedules regular cleanup of expired nullifiers.
-   */
+  /** Schedules regular cleanup of expired nullifiers. */
   private void scheduleCleanupTasks() {
     // Run cleanup every hour
-    cleanupScheduler.scheduleAtFixedRate(
-        this::cleanupExpiredNullifiers, 1, 1, TimeUnit.HOURS);
+    cleanupScheduler.scheduleAtFixedRate(this::cleanupExpiredNullifiers, 1, 1, TimeUnit.HOURS);
   }
 
-  /**
-   * Removes expired nullifiers from memory and rewrites storage file.
-   */
+  /** Removes expired nullifiers from memory and rewrites storage file. */
   private void cleanupExpiredNullifiers() {
     LOG.debug("{}: Starting nullifier cleanup", serviceName);
-    
+
     Instant cutoff = Instant.now().minus(Duration.ofHours(nullifierExpiryHours));
     int beforeSize = usedNullifiers.size();
 
@@ -291,10 +278,7 @@ public class NullifierTracker implements Closeable {
     if (removed > 0) {
       cleanupOperations.incrementAndGet();
       LOG.info(
-          "{}: Cleaned up {} expired nullifiers, {} remaining",
-          serviceName,
-          removed,
-          afterSize);
+          "{}: Cleaned up {} expired nullifiers, {} remaining", serviceName, removed, afterSize);
 
       // Rewrite storage file with only non-expired entries
       rewriteStorageFile();
@@ -303,38 +287,38 @@ public class NullifierTracker implements Closeable {
     }
   }
 
-  /**
-   * Rewrites the entire storage file with only current nullifiers.
-   */
+  /** Rewrites the entire storage file with only current nullifiers. */
   private void rewriteStorageFile() {
     try {
       // Write to temporary file first
-      Path tempFile = nullifierStorageFile.getParent().resolve(nullifierStorageFile.getFileName() + ".tmp");
-      
+      Path tempFile =
+          nullifierStorageFile.getParent().resolve(nullifierStorageFile.getFileName() + ".tmp");
+
       StringBuilder content = new StringBuilder();
       content.append("# Nullifier tracking file for ").append(serviceName).append("\n");
       content.append("# Format: nullifier,timestamp,epoch\n");
 
       // CRITICAL FIX: Use actual epoch data instead of hardcoded "epoch"
-      usedNullifiers.forEach((epochScopedKey, data) -> {
-        content.append(String.format("%s,%s,%s%n", data.nullifier(), data.timestamp(), data.epochId()));
-      });
+      usedNullifiers.forEach(
+          (epochScopedKey, data) -> {
+            content.append(
+                String.format("%s,%s,%s%n", data.nullifier(), data.timestamp(), data.epochId()));
+          });
 
       Files.writeString(tempFile, content.toString(), StandardCharsets.UTF_8);
-      
+
       // Atomic replace
       Files.move(tempFile, nullifierStorageFile);
-      
-      LOG.debug("{}: Rewrote nullifier storage file with {} entries", serviceName, usedNullifiers.size());
+
+      LOG.debug(
+          "{}: Rewrote nullifier storage file with {} entries", serviceName, usedNullifiers.size());
 
     } catch (IOException e) {
       LOG.error("{}: Failed to rewrite nullifier storage file: {}", serviceName, e.getMessage(), e);
     }
   }
 
-  /**
-   * Returns current nullifier tracking statistics.
-   */
+  /** Returns current nullifier tracking statistics. */
   public NullifierStats getStats() {
     return new NullifierStats(
         usedNullifiers.size(),
@@ -343,19 +327,14 @@ public class NullifierTracker implements Closeable {
         cleanupOperations.get());
   }
 
-  /**
-   * Statistics record for nullifier tracking.
-   */
+  /** Statistics record for nullifier tracking. */
   public record NullifierStats(
-      int currentNullifiers,
-      long totalTracked,
-      long duplicateAttempts,
-      long cleanupOperations) {}
+      int currentNullifiers, long totalTracked, long duplicateAttempts, long cleanupOperations) {}
 
   @Override
   public void close() throws IOException {
     LOG.info("{}: Shutting down nullifier tracker", serviceName);
-    
+
     if (cleanupScheduler != null && !cleanupScheduler.isShutdown()) {
       cleanupScheduler.shutdown();
       try {
@@ -370,7 +349,7 @@ public class NullifierTracker implements Closeable {
 
     // Final cleanup and storage update
     cleanupExpiredNullifiers();
-    
+
     NullifierStats stats = getStats();
     LOG.info(
         "{}: Nullifier tracker shutdown complete. Final stats: {} current, {} total tracked, {} duplicates blocked",
@@ -379,4 +358,4 @@ public class NullifierTracker implements Closeable {
         stats.totalTracked(),
         stats.duplicateAttempts());
   }
-} 
+}

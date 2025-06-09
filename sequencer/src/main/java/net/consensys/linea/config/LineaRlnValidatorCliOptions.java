@@ -23,7 +23,7 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
   public static final String CONFIG_KEY = "RLN_VALIDATOR_CONFIG";
 
   // === ESSENTIAL OPTIONS (what operators actually need to configure) ===
-  
+
   @CommandLine.Option(
       names = "--plugin-linea-rln-enabled",
       description = "Enable RLN validation for gasless transactions (default: ${DEFAULT-VALUE})",
@@ -44,7 +44,7 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
   private String proofService = "localhost:50051";
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-karma-service", 
+      names = "--plugin-linea-rln-karma-service",
       description = "Karma service endpoint (host:port, default: ${DEFAULT-VALUE})",
       arity = "1")
   private String karmaService = "localhost:50052";
@@ -56,17 +56,18 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
   private String denyListPath = "/var/lib/linea/deny_list.txt";
 
   // === ADVANCED OPTIONS (most users won't need to change these) ===
-  
+
   @CommandLine.Option(
       names = "--plugin-linea-rln-use-tls",
       description = "Use TLS for gRPC services (default: auto-detect based on ports)",
       arity = "1")
-  private Optional<Boolean> useTls = Optional.empty(); // Auto-detect: false for :505x, true for :443/8443
+  private Optional<Boolean> useTls =
+      Optional.empty(); // Auto-detect: false for :505x, true for :443/8443
 
   @CommandLine.Option(
       names = "--plugin-linea-rln-premium-gas-threshold-gwei",
       description = "Premium gas threshold in GWei to bypass deny list (default: ${DEFAULT-VALUE})",
-      arity = "1")  
+      arity = "1")
   private long premiumGasThresholdGWei = 10L; // 10 GWei
 
   @CommandLine.Option(
@@ -87,22 +88,25 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
     String[] proofParts = proofService.split(":");
     String proofHost = proofParts[0];
     int proofPort = Integer.parseInt(proofParts[1]);
-    
+
     String[] karmaParts = karmaService.split(":");
     String karmaHost = karmaParts[0];
     int karmaPort = Integer.parseInt(karmaParts[1]);
-    
+
     // Auto-detect TLS based on ports if not explicitly set
-    boolean shouldUseTls = useTls.orElse(proofPort == 443 || proofPort == 8443 || karmaPort == 443 || karmaPort == 8443);
-    
+    boolean shouldUseTls =
+        useTls.orElse(
+            proofPort == 443 || proofPort == 8443 || karmaPort == 443 || karmaPort == 8443);
+
     // Create shared gasless config with simplified settings
-    LineaSharedGaslessConfiguration sharedConfig = new LineaSharedGaslessConfiguration(
-        denyListPath,
-        60L, // 1 minute refresh interval (good default)
-        premiumGasThresholdGWei,
-        60L // 1 hour expiry (good default)
-    );
-    
+    LineaSharedGaslessConfiguration sharedConfig =
+        new LineaSharedGaslessConfiguration(
+            denyListPath,
+            60L, // 1 minute refresh interval (good default)
+            premiumGasThresholdGWei,
+            60L // 1 hour expiry (good default)
+            );
+
     return new LineaRlnValidatorConfiguration(
         rlnValidationEnabled,
         verifyingKeyPath,
@@ -123,6 +127,6 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
         60000L, // maxBackoffDelayMs (1 min, good default)
         "TIMESTAMP_1H", // defaultEpochForQuota (good default)
         Optional.empty() // rlnJniLibPath (use system path)
-    );
+        );
   }
 }

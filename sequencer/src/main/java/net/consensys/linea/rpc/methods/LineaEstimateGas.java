@@ -600,9 +600,9 @@ public class LineaEstimateGas {
   }
 
   /**
-   * Fetches karma information for a user via shared Karma Service client.
-   * Used only to check if user has karma balance > 0 for gasless eligibility.
-   * The karma service handles all transaction counting internally.
+   * Fetches karma information for a user via shared Karma Service client. Used only to check if
+   * user has karma balance > 0 for gasless eligibility. The karma service handles all transaction
+   * counting internally.
    */
   private Optional<KarmaInfo> fetchKarmaInfoFromService(Address userAddress) {
     if (karmaServiceClient == null || !karmaServiceClient.isAvailable()) {

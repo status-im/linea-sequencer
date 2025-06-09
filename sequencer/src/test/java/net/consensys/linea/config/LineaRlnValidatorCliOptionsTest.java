@@ -16,8 +16,6 @@ package net.consensys.linea.config;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import java.util.Optional;
-
 import org.junit.jupiter.api.Test;
 import picocli.CommandLine;
 
@@ -39,15 +37,15 @@ class LineaRlnValidatorCliOptionsTest {
     assertEquals("localhost", actualConfig.karmaServiceHost());
     assertEquals(50052, actualConfig.karmaServicePort());
     assertEquals("/var/lib/linea/deny_list.txt", actualConfig.denyListPath());
-    
+
     // Test auto-detected values
     assertFalse(actualConfig.rlnProofServiceUseTls()); // Should be false for default ports
     assertFalse(actualConfig.karmaServiceUseTls());
     assertEquals(5000L, actualConfig.karmaServiceTimeoutMs());
-    
+
     // Test reasonable defaults for advanced options
     assertEquals(10000L, actualConfig.rlnProofCacheMaxSize());
-    assertEquals(300L, actualConfig.rlnProofCacheExpirySeconds()); 
+    assertEquals(300L, actualConfig.rlnProofCacheExpirySeconds());
     assertEquals(5, actualConfig.rlnProofStreamRetries());
     assertTrue(actualConfig.exponentialBackoffEnabled());
     assertEquals("TIMESTAMP_1H", actualConfig.defaultEpochForQuota());
@@ -79,12 +77,13 @@ class LineaRlnValidatorCliOptionsTest {
     assertEquals("custom.karma", actualConfig.karmaServiceHost());
     assertEquals(8080, actualConfig.karmaServicePort());
     assertEquals("/custom/deny.txt", actualConfig.denyListPath());
-    
+
     // Test explicitly set values
     assertTrue(actualConfig.rlnProofServiceUseTls());
     assertTrue(actualConfig.karmaServiceUseTls());
     assertEquals(10000L, actualConfig.karmaServiceTimeoutMs());
-    assertEquals(20L, actualConfig.premiumGasPriceThresholdWei() / 1_000_000_000L); // Convert back to GWei
+    assertEquals(
+        20L, actualConfig.premiumGasPriceThresholdWei() / 1_000_000_000L); // Convert back to GWei
   }
 
   @Test
