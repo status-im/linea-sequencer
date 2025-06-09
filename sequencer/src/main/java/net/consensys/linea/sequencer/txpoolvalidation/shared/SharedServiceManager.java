@@ -30,6 +30,7 @@ import org.slf4j.LoggerFactory;
  * <ul>
  *   <li>DenyListManager: Single source of truth for deny list state
  *   <li>KarmaServiceClient: Shared gRPC client for karma service
+ *   <li>NullifierTracker: Prevents nullifier reuse in RLN proofs
  * </ul>
  *
  * <p>The manager handles initialization, configuration, and proper cleanup of all shared resources
@@ -43,6 +44,7 @@ public class SharedServiceManager implements Closeable {
 
   private DenyListManager denyListManager;
   private KarmaServiceClient karmaServiceClient;
+  private NullifierTracker nullifierTracker;
   private final boolean gaslessEnabled;
 
   /**
@@ -92,6 +94,21 @@ public class SharedServiceManager implements Closeable {
               rlnConfig.karmaServiceTimeoutMs());
       LOG.info("KarmaServiceClient initialized successfully");
 
+      // Initialize NullifierTracker
+      if (rlnConfig.sharedGaslessConfig() != null) {
+        String nullifierStoragePath = rlnConfig.sharedGaslessConfig().denyListPath().replace("deny_list.txt", "nullifiers.txt");
+        long nullifierExpiryHours = rlnConfig.denyListEntryMaxAgeMinutes() / 60 * 2; // 2x deny list expiry for safety
+        
+        this.nullifierTracker =
+            new NullifierTracker(
+                "SharedServiceManager", 
+                nullifierStoragePath, 
+                nullifierExpiryHours);
+        LOG.info("NullifierTracker initialized successfully");
+      } else {
+        LOG.warn("Cannot initialize NullifierTracker: sharedGaslessConfig is null");
+      }
+
     } catch (Exception e) {
       LOG.error("Failed to initialize shared services: {}", e.getMessage(), e);
       // Clean up any partially initialized services
@@ -116,6 +133,15 @@ public class SharedServiceManager implements Closeable {
    */
   public KarmaServiceClient getKarmaServiceClient() {
     return karmaServiceClient;
+  }
+
+  /**
+   * Gets the shared NullifierTracker instance.
+   *
+   * @return NullifierTracker instance, or null if gasless features are disabled
+   */
+  public NullifierTracker getNullifierTracker() {
+    return nullifierTracker;
   }
 
   /**
@@ -154,6 +180,18 @@ public class SharedServiceManager implements Closeable {
         LOG.info("DenyListManager closed successfully");
       } catch (IOException e) {
         LOG.error("Error closing DenyListManager: {}", e.getMessage(), e);
+        if (firstException == null) {
+          firstException = e;
+        }
+      }
+    }
+
+    if (nullifierTracker != null) {
+      try {
+        nullifierTracker.close();
+        LOG.info("NullifierTracker closed successfully");
+      } catch (IOException e) {
+        LOG.error("Error closing NullifierTracker: {}", e.getMessage(), e);
         if (firstException == null) {
           firstException = e;
         }

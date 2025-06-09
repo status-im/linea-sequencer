@@ -103,7 +103,8 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
               rlnValidatorConf,
               blockchainService,
               sharedServiceManager.getDenyListManager(),
-              sharedServiceManager.getKarmaServiceClient()));
+              sharedServiceManager.getKarmaServiceClient(),
+              sharedServiceManager.getNullifierTracker()));
     }
 
     validatorsList.add(

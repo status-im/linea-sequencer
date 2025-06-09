@@ -45,20 +45,8 @@ public class LineaRpcCliOptions implements LineaCliOptions {
       "--plugin-linea-rpc-allow-zero-gas-estimation-gasless";
   private static final boolean DEFAULT_RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS = false;
 
-  // CLI options for karma service configuration
-  private static final String RPC_KARMA_SERVICE_HOST = "--plugin-linea-rpc-karma-service-host";
-  private static final String DEFAULT_RPC_KARMA_SERVICE_HOST = "localhost";
-
-  private static final String RPC_KARMA_SERVICE_PORT = "--plugin-linea-rpc-karma-service-port";
-  private static final int DEFAULT_RPC_KARMA_SERVICE_PORT = 50052;
-
-  private static final String RPC_KARMA_SERVICE_USE_TLS =
-      "--plugin-linea-rpc-karma-service-use-tls";
-  private static final boolean DEFAULT_RPC_KARMA_SERVICE_USE_TLS = false;
-
-  private static final String RPC_KARMA_SERVICE_TIMEOUT_MS =
-      "--plugin-linea-rpc-karma-service-timeout-ms";
-  private static final long DEFAULT_RPC_KARMA_SERVICE_TIMEOUT_MS = 5000L;
+  // Note: Karma service configuration is now handled by RLN validator config
+  // This avoids duplication and ensures consistency
 
   @CommandLine.Option(
       names = {ESTIMATE_GAS_COMPATIBILITY_MODE_ENABLED},
@@ -80,50 +68,22 @@ public class LineaRpcCliOptions implements LineaCliOptions {
       names = {RPC_GASLESS_ENABLED},
       paramLabel = "<BOOLEAN>",
       description =
-          "Enable gasless transaction features in RPC methods like linea_estimateGas (default: ${DEFAULT-VALUE})")
+          "Enable gasless transaction features for linea_estimateGas (default: ${DEFAULT-VALUE})")
   private boolean gaslessTransactionsEnabled = DEFAULT_RPC_GASLESS_ENABLED;
 
   @CommandLine.Option(
       names = {RPC_PREMIUM_GAS_MULTIPLIER},
       paramLabel = "<DOUBLE>",
       description =
-          "Multiplier for calculating premium gas price in estimateGas for denied users (default: ${DEFAULT-VALUE})")
+          "Gas multiplier for denied users in linea_estimateGas (default: ${DEFAULT-VALUE})")
   private double premiumGasMultiplier = DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER;
 
   @CommandLine.Option(
       names = {RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS},
       paramLabel = "<BOOLEAN>",
       description =
-          "Allow linea_estimateGas to return 0 for gasless transactions if user is not on deny list (default: ${DEFAULT-VALUE})")
+          "Allow zero gas estimation for users with karma balance (default: ${DEFAULT-VALUE})")
   private boolean allowZeroGasEstimationForGasless = DEFAULT_RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS;
-
-  @CommandLine.Option(
-      names = {RPC_KARMA_SERVICE_HOST},
-      paramLabel = "<STRING>",
-      description =
-          "Hostname for the Karma gRPC service used by linea_estimateGas (default: ${DEFAULT-VALUE})")
-  private String karmaServiceHost = DEFAULT_RPC_KARMA_SERVICE_HOST;
-
-  @CommandLine.Option(
-      names = {RPC_KARMA_SERVICE_PORT},
-      paramLabel = "<INTEGER>",
-      description =
-          "Port for the Karma gRPC service used by linea_estimateGas (default: ${DEFAULT-VALUE})")
-  private int karmaServicePort = DEFAULT_RPC_KARMA_SERVICE_PORT;
-
-  @CommandLine.Option(
-      names = {RPC_KARMA_SERVICE_USE_TLS},
-      paramLabel = "<BOOLEAN>",
-      description =
-          "Use TLS for gRPC connection to karma service in linea_estimateGas (default: ${DEFAULT-VALUE})")
-  private boolean karmaServiceUseTls = DEFAULT_RPC_KARMA_SERVICE_USE_TLS;
-
-  @CommandLine.Option(
-      names = {RPC_KARMA_SERVICE_TIMEOUT_MS},
-      paramLabel = "<LONG>",
-      description =
-          "Timeout for karma service requests in milliseconds for linea_estimateGas (default: ${DEFAULT-VALUE})")
-  private long karmaServiceTimeoutMs = DEFAULT_RPC_KARMA_SERVICE_TIMEOUT_MS;
 
   private LineaRpcCliOptions() {}
 
@@ -149,10 +109,6 @@ public class LineaRpcCliOptions implements LineaCliOptions {
     options.gaslessTransactionsEnabled = config.gaslessTransactionsEnabled();
     options.premiumGasMultiplier = config.premiumGasMultiplier();
     options.allowZeroGasEstimationForGasless = config.allowZeroGasEstimationForGasless();
-    options.karmaServiceHost = config.karmaServiceHost();
-    options.karmaServicePort = config.karmaServicePort();
-    options.karmaServiceUseTls = config.karmaServiceUseTls();
-    options.karmaServiceTimeoutMs = config.karmaServiceTimeoutMs();
     return options;
   }
 
@@ -169,10 +125,6 @@ public class LineaRpcCliOptions implements LineaCliOptions {
         .gaslessTransactionsEnabled(gaslessTransactionsEnabled)
         .premiumGasMultiplier(premiumGasMultiplier)
         .allowZeroGasEstimationForGasless(allowZeroGasEstimationForGasless)
-        .karmaServiceHost(karmaServiceHost)
-        .karmaServicePort(karmaServicePort)
-        .karmaServiceUseTls(karmaServiceUseTls)
-        .karmaServiceTimeoutMs(karmaServiceTimeoutMs)
         .sharedGaslessConfig(sharedConfig) // Inject the shared config
         .build();
   }
@@ -195,10 +147,6 @@ public class LineaRpcCliOptions implements LineaCliOptions {
         .add(RPC_GASLESS_ENABLED, gaslessTransactionsEnabled)
         .add(RPC_PREMIUM_GAS_MULTIPLIER, premiumGasMultiplier)
         .add(RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS, allowZeroGasEstimationForGasless)
-        .add(RPC_KARMA_SERVICE_HOST, karmaServiceHost)
-        .add(RPC_KARMA_SERVICE_PORT, karmaServicePort)
-        .add(RPC_KARMA_SERVICE_USE_TLS, karmaServiceUseTls)
-        .add(RPC_KARMA_SERVICE_TIMEOUT_MS, karmaServiceTimeoutMs)
         .toString();
   }
 }

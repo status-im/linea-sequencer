@@ -29,113 +29,98 @@ class LineaRlnValidatorCliOptionsTest {
     // Parse with no arguments to ensure defaults are used
     new CommandLine(cliOptions).parseArgs();
 
-    LineaRlnValidatorConfiguration defaultConfig = LineaRlnValidatorConfiguration.V1_DEFAULT;
     LineaRlnValidatorConfiguration actualConfig = cliOptions.toDomainObject();
 
-    assertEquals(defaultConfig.rlnValidationEnabled(), actualConfig.rlnValidationEnabled());
-    assertEquals(defaultConfig.verifyingKeyPath(), actualConfig.verifyingKeyPath());
-    assertEquals(defaultConfig.rlnProofServiceHost(), actualConfig.rlnProofServiceHost());
-    assertEquals(defaultConfig.rlnProofServicePort(), actualConfig.rlnProofServicePort());
-    assertEquals(defaultConfig.rlnProofServiceUseTls(), actualConfig.rlnProofServiceUseTls());
-    assertEquals(defaultConfig.rlnProofCacheMaxSize(), actualConfig.rlnProofCacheMaxSize());
-    assertEquals(
-        defaultConfig.rlnProofCacheExpirySeconds(), actualConfig.rlnProofCacheExpirySeconds());
-    assertEquals(defaultConfig.rlnProofStreamRetries(), actualConfig.rlnProofStreamRetries());
-    assertEquals(
-        defaultConfig.rlnProofStreamRetryIntervalMs(),
-        actualConfig.rlnProofStreamRetryIntervalMs());
-    assertEquals(
-        defaultConfig.rlnProofLocalWaitTimeoutMs(), actualConfig.rlnProofLocalWaitTimeoutMs());
-    assertEquals(defaultConfig.karmaServiceHost(), actualConfig.karmaServiceHost());
-    assertEquals(defaultConfig.karmaServicePort(), actualConfig.karmaServicePort());
-    assertEquals(defaultConfig.karmaServiceUseTls(), actualConfig.karmaServiceUseTls());
-    assertEquals(defaultConfig.karmaServiceTimeoutMs(), actualConfig.karmaServiceTimeoutMs());
-    assertEquals(
-        defaultConfig.exponentialBackoffEnabled(), actualConfig.exponentialBackoffEnabled());
-    assertEquals(defaultConfig.maxBackoffDelayMs(), actualConfig.maxBackoffDelayMs());
-    assertEquals(defaultConfig.defaultEpochForQuota(), actualConfig.defaultEpochForQuota());
-    assertEquals(defaultConfig.rlnJniLibPath(), actualConfig.rlnJniLibPath());
-
-    // Check shared gasless configuration defaults
-    LineaSharedGaslessConfiguration defaultSharedConfig =
-        LineaSharedGaslessConfiguration.V1_DEFAULT;
-    LineaSharedGaslessConfiguration actualSharedConfig = actualConfig.sharedGaslessConfig();
-    assertNotNull(actualSharedConfig, "Shared gasless configuration should not be null");
-    assertEquals(defaultSharedConfig.denyListPath(), actualSharedConfig.denyListPath());
-    assertEquals(
-        defaultSharedConfig.denyListRefreshSeconds(), actualSharedConfig.denyListRefreshSeconds());
-    assertEquals(
-        defaultSharedConfig.denyListEntryMaxAgeMinutes(),
-        actualSharedConfig.denyListEntryMaxAgeMinutes());
-    assertEquals(
-        defaultSharedConfig.premiumGasPriceThresholdGWei(),
-        actualSharedConfig.premiumGasPriceThresholdGWei());
+    // Test essential options with defaults
+    assertFalse(actualConfig.rlnValidationEnabled()); // Disabled by default
+    assertEquals("/etc/linea/rln_verifying_key.bin", actualConfig.verifyingKeyPath());
+    assertEquals("localhost", actualConfig.rlnProofServiceHost());
+    assertEquals(50051, actualConfig.rlnProofServicePort());
+    assertEquals("localhost", actualConfig.karmaServiceHost());
+    assertEquals(50052, actualConfig.karmaServicePort());
+    assertEquals("/var/lib/linea/deny_list.txt", actualConfig.denyListPath());
+    
+    // Test auto-detected values
+    assertFalse(actualConfig.rlnProofServiceUseTls()); // Should be false for default ports
+    assertFalse(actualConfig.karmaServiceUseTls());
+    assertEquals(5000L, actualConfig.karmaServiceTimeoutMs());
+    
+    // Test reasonable defaults for advanced options
+    assertEquals(10000L, actualConfig.rlnProofCacheMaxSize());
+    assertEquals(300L, actualConfig.rlnProofCacheExpirySeconds()); 
+    assertEquals(5, actualConfig.rlnProofStreamRetries());
+    assertTrue(actualConfig.exponentialBackoffEnabled());
+    assertEquals("TIMESTAMP_1H", actualConfig.defaultEpochForQuota());
+    assertTrue(actualConfig.rlnJniLibPath().isEmpty());
   }
 
   @Test
   void toDomainObject_withSpecificCliOptions_shouldReturnMatchingConfiguration() {
     LineaRlnValidatorCliOptions cliOptions = LineaRlnValidatorCliOptions.create();
     String[] args = {
-      "--plugin-linea-rln-validation-enabled=false",
-      "--plugin-linea-rln-verifying-key-path=/custom/vk.key",
-      "--plugin-linea-rln-proof-service-host=testhost",
-      "--plugin-linea-rln-proof-service-port=9999",
-      "--plugin-linea-rln-proof-service-use-tls=true",
-      "--plugin-linea-rln-proof-cache-max-size=500",
-      "--plugin-linea-rln-proof-cache-expiry-seconds=60",
-      "--plugin-linea-rln-proof-stream-retries=10",
-      "--plugin-linea-rln-proof-stream-retry-interval-ms=10000",
-      "--plugin-linea-rln-proof-local-wait-timeout-ms=200",
-      "--plugin-linea-rln-karma-service-host=custom.karma",
-      "--plugin-linea-rln-karma-service-port=8080",
-      "--plugin-linea-rln-karma-service-use-tls=true",
-      "--plugin-linea-rln-karma-service-timeout-ms=10000",
-      "--plugin-linea-rln-exponential-backoff-enabled=false",
-      "--plugin-linea-rln-max-backoff-delay-ms=120000",
-      "--plugin-linea-rln-default-epoch-for-quota=BLOCK_NUMBER_100",
-      "--plugin-linea-rln-jni-lib-path=/custom/lib/rln.so"
-      // Shared options Temporarily Removed for diagnostics
-      // "--plugin-linea-shared-deny-list-path=/custom/deny.txt",
-      // "--plugin-linea-shared-deny-list-refresh-seconds=120",
-      // "--plugin-linea-shared-deny-list-entry-max-age-minutes=30",
-      // "--plugin-linea-shared-premium-gas-price-threshold-gwei=5000"
+      "--plugin-linea-rln-enabled=true",
+      "--plugin-linea-rln-verifying-key=/custom/vk.key",
+      "--plugin-linea-rln-proof-service=testhost:9999",
+      "--plugin-linea-rln-karma-service=custom.karma:8080",
+      "--plugin-linea-rln-deny-list-path=/custom/deny.txt",
+      "--plugin-linea-rln-use-tls=true",
+      "--plugin-linea-rln-premium-gas-threshold-gwei=20",
+      "--plugin-linea-rln-timeouts-ms=10000"
     };
     new CommandLine(cliOptions).parseArgs(args);
 
     LineaRlnValidatorConfiguration actualConfig = cliOptions.toDomainObject();
 
-    assertFalse(actualConfig.rlnValidationEnabled());
+    // Test essential options
+    assertTrue(actualConfig.rlnValidationEnabled());
     assertEquals("/custom/vk.key", actualConfig.verifyingKeyPath());
     assertEquals("testhost", actualConfig.rlnProofServiceHost());
     assertEquals(9999, actualConfig.rlnProofServicePort());
-    assertTrue(actualConfig.rlnProofServiceUseTls());
-    assertEquals(500L, actualConfig.rlnProofCacheMaxSize());
-    assertEquals(60L, actualConfig.rlnProofCacheExpirySeconds());
-    assertEquals(10, actualConfig.rlnProofStreamRetries());
-    assertEquals(10000L, actualConfig.rlnProofStreamRetryIntervalMs());
-    assertEquals(200L, actualConfig.rlnProofLocalWaitTimeoutMs());
     assertEquals("custom.karma", actualConfig.karmaServiceHost());
     assertEquals(8080, actualConfig.karmaServicePort());
+    assertEquals("/custom/deny.txt", actualConfig.denyListPath());
+    
+    // Test explicitly set values
+    assertTrue(actualConfig.rlnProofServiceUseTls());
     assertTrue(actualConfig.karmaServiceUseTls());
     assertEquals(10000L, actualConfig.karmaServiceTimeoutMs());
-    assertFalse(actualConfig.exponentialBackoffEnabled());
-    assertEquals(120000L, actualConfig.maxBackoffDelayMs());
-    assertEquals("BLOCK_NUMBER_100", actualConfig.defaultEpochForQuota());
-    assertEquals(Optional.of("/custom/lib/rln.so"), actualConfig.rlnJniLibPath());
+    assertEquals(20L, actualConfig.premiumGasPriceThresholdWei() / 1_000_000_000L); // Convert back to GWei
+  }
 
-    // Since shared options are removed from args, the shared config should have defaults.
-    LineaSharedGaslessConfiguration actualSharedConfig = actualConfig.sharedGaslessConfig();
-    assertNotNull(actualSharedConfig);
-    LineaSharedGaslessConfiguration defaultSharedConfig =
-        LineaSharedGaslessConfiguration.V1_DEFAULT;
-    assertEquals(defaultSharedConfig.denyListPath(), actualSharedConfig.denyListPath());
-    assertEquals(
-        defaultSharedConfig.denyListRefreshSeconds(), actualSharedConfig.denyListRefreshSeconds());
-    assertEquals(
-        defaultSharedConfig.denyListEntryMaxAgeMinutes(),
-        actualSharedConfig.denyListEntryMaxAgeMinutes());
-    assertEquals(
-        defaultSharedConfig.premiumGasPriceThresholdGWei(),
-        actualSharedConfig.premiumGasPriceThresholdGWei());
+  @Test
+  void toDomainObject_shouldAutoDetectTlsForStandardPorts() {
+    LineaRlnValidatorCliOptions cliOptions = LineaRlnValidatorCliOptions.create();
+    String[] args = {
+      "--plugin-linea-rln-proof-service=secure.example.com:443",
+      "--plugin-linea-rln-karma-service=karma.example.com:8443"
+    };
+    new CommandLine(cliOptions).parseArgs(args);
+
+    LineaRlnValidatorConfiguration actualConfig = cliOptions.toDomainObject();
+
+    // Should auto-detect TLS for standard secure ports
+    assertTrue(actualConfig.rlnProofServiceUseTls());
+    assertTrue(actualConfig.karmaServiceUseTls());
+    assertEquals("secure.example.com", actualConfig.rlnProofServiceHost());
+    assertEquals(443, actualConfig.rlnProofServicePort());
+    assertEquals("karma.example.com", actualConfig.karmaServiceHost());
+    assertEquals(8443, actualConfig.karmaServicePort());
+  }
+
+  @Test
+  void toDomainObject_shouldParseHostPortCorrectly() {
+    LineaRlnValidatorCliOptions cliOptions = LineaRlnValidatorCliOptions.create();
+    String[] args = {
+      "--plugin-linea-rln-proof-service=proof.linea.build:50051",
+      "--plugin-linea-rln-karma-service=karma.linea.build:50052"
+    };
+    new CommandLine(cliOptions).parseArgs(args);
+
+    LineaRlnValidatorConfiguration actualConfig = cliOptions.toDomainObject();
+
+    assertEquals("proof.linea.build", actualConfig.rlnProofServiceHost());
+    assertEquals(50051, actualConfig.rlnProofServicePort());
+    assertEquals("karma.linea.build", actualConfig.karmaServiceHost());
+    assertEquals(50052, actualConfig.karmaServicePort());
   }
 }

@@ -32,7 +32,7 @@ import net.consensys.linea.config.LineaRlnValidatorCliOptions;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaRpcCliOptions;
 import net.consensys.linea.config.LineaRpcConfiguration;
-import net.consensys.linea.config.LineaSharedGaslessCliOptions;
+
 import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.config.LineaTracerCliOptions;
 import net.consensys.linea.config.LineaTracerConfiguration;
@@ -181,14 +181,14 @@ public abstract class AbstractLineaSharedPrivateOptionsPlugin
   }
 
   public LineaSharedGaslessConfiguration sharedGaslessConfiguration() {
-    // Attempting to retrieve via LineaRlnValidatorCliOptions which mixes it in:
+    // Shared gasless configuration is now embedded in RLN validator configuration
     LineaRlnValidatorConfiguration rlnConfig = rlnValidatorConfiguration();
     if (rlnConfig != null && rlnConfig.sharedGaslessConfig() != null) {
       return rlnConfig.sharedGaslessConfig();
     }
 
-    return (LineaSharedGaslessConfiguration)
-        getConfigurationByKey(LineaSharedGaslessCliOptions.CONFIG_KEY).optionsConfig();
+    // Fallback to default configuration if RLN is not configured
+    return LineaSharedGaslessConfiguration.V1_DEFAULT;
   }
 
   @Override

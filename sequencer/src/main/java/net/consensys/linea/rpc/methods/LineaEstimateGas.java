@@ -266,8 +266,9 @@ public class LineaEstimateGas {
               sender.toHexString(),
               karmaInfo.karmaBalance());
         } else {
-          // Karma service unavailable or user not found - assume no karma, proceed to normal
-          // estimation
+          // SECURITY: When karma service is unavailable, we should be more cautious
+          // For gas estimation, we can proceed with standard estimation since it's not validation
+          // But we should log this for monitoring purposes
           log.debug(
               "[{}] Karma service unavailable or user {} not found. Proceeding with standard gas estimation.",
               logId,
@@ -599,8 +600,9 @@ public class LineaEstimateGas {
   }
 
   /**
-   * Fetches karma information for a user via shared Karma Service client. Used only to check if
-   * user has karma balance > 0 for gasless eligibility.
+   * Fetches karma information for a user via shared Karma Service client.
+   * Used only to check if user has karma balance > 0 for gasless eligibility.
+   * The karma service handles all transaction counting internally.
    */
   private Optional<KarmaInfo> fetchKarmaInfoFromService(Address userAddress) {
     if (karmaServiceClient == null || !karmaServiceClient.isAvailable()) {

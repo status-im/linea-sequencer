@@ -22,134 +22,58 @@ import picocli.CommandLine;
 public class LineaRlnValidatorCliOptions implements LineaCliOptions {
   public static final String CONFIG_KEY = "RLN_VALIDATOR_CONFIG";
 
+  // === ESSENTIAL OPTIONS (what operators actually need to configure) ===
+  
   @CommandLine.Option(
-      names = "--plugin-linea-rln-validation-enabled",
-      description = "Enable RLN validation (default: ${DEFAULT-VALUE})",
+      names = "--plugin-linea-rln-enabled",
+      description = "Enable RLN validation for gasless transactions (default: ${DEFAULT-VALUE})",
       arity = "1")
   private boolean rlnValidationEnabled =
       LineaRlnValidatorConfiguration.V1_DEFAULT.rlnValidationEnabled();
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-verifying-key-path",
-      description = "Path to the RLN verifying key file (default: ${DEFAULT-VALUE})",
+      names = "--plugin-linea-rln-verifying-key",
+      description = "Path to the RLN verifying key file (required when RLN is enabled)",
       arity = "1")
   private String verifyingKeyPath = LineaRlnValidatorConfiguration.V1_DEFAULT.verifyingKeyPath();
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-service-host",
-      description = "Hostname for the RLN Proof gRPC service (default: ${DEFAULT-VALUE})",
+      names = "--plugin-linea-rln-proof-service",
+      description = "RLN Proof service endpoint (host:port, default: ${DEFAULT-VALUE})",
       arity = "1")
-  private String rlnProofServiceHost =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofServiceHost();
+  private String proofService = "localhost:50051";
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-service-port",
-      description = "Port for the RLN Proof gRPC service (default: ${DEFAULT-VALUE})",
+      names = "--plugin-linea-rln-karma-service", 
+      description = "Karma service endpoint (host:port, default: ${DEFAULT-VALUE})",
       arity = "1")
-  private int rlnProofServicePort = LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofServicePort();
+  private String karmaService = "localhost:50052";
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-service-use-tls",
-      description = "Use TLS for gRPC connection to proof service (default: ${DEFAULT-VALUE})",
+      names = "--plugin-linea-rln-deny-list-path",
+      description = "Path to the deny list file (default: ${DEFAULT-VALUE})",
       arity = "1")
-  private boolean rlnProofServiceUseTls =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofServiceUseTls();
+  private String denyListPath = "/var/lib/linea/deny_list.txt";
+
+  // === ADVANCED OPTIONS (most users won't need to change these) ===
+  
+  @CommandLine.Option(
+      names = "--plugin-linea-rln-use-tls",
+      description = "Use TLS for gRPC services (default: auto-detect based on ports)",
+      arity = "1")
+  private Optional<Boolean> useTls = Optional.empty(); // Auto-detect: false for :505x, true for :443/8443
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-cache-max-size",
-      description = "Maximum number of proofs in the in-memory cache (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private long rlnProofCacheMaxSize =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofCacheMaxSize();
+      names = "--plugin-linea-rln-premium-gas-threshold-gwei",
+      description = "Premium gas threshold in GWei to bypass deny list (default: ${DEFAULT-VALUE})",
+      arity = "1")  
+  private long premiumGasThresholdGWei = 10L; // 10 GWei
 
   @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-cache-expiry-seconds",
-      description =
-          "Time-to-live for proofs in the in-memory cache (seconds) (default: ${DEFAULT-VALUE})",
+      names = "--plugin-linea-rln-timeouts-ms",
+      description = "Service timeout in milliseconds (default: ${DEFAULT-VALUE})",
       arity = "1")
-  private long rlnProofCacheExpirySeconds =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofCacheExpirySeconds();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-stream-retries",
-      description = "Max retries for gRPC stream connection (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private int rlnProofStreamRetries =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofStreamRetries();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-stream-retry-interval-ms",
-      description = "Interval for gRPC stream retry attempts (ms) (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private long rlnProofStreamRetryIntervalMs =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofStreamRetryIntervalMs();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-proof-local-wait-timeout-ms",
-      description = "Timeout for waiting for proof in local cache (ms) (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private long rlnProofLocalWaitTimeoutMs =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnProofLocalWaitTimeoutMs();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-karma-service-host",
-      description = "Hostname for the Karma gRPC service (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private String karmaServiceHost = LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceHost();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-karma-service-port",
-      description = "Port for the Karma gRPC service (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private int karmaServicePort = LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServicePort();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-karma-service-use-tls",
-      description = "Use TLS for gRPC connection to karma service (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private boolean karmaServiceUseTls =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceUseTls();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-karma-service-timeout-ms",
-      description =
-          "Timeout for karma service requests in milliseconds (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private long karmaServiceTimeoutMs =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.karmaServiceTimeoutMs();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-exponential-backoff-enabled",
-      description = "Enable exponential backoff for gRPC reconnections (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private boolean exponentialBackoffEnabled =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.exponentialBackoffEnabled();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-max-backoff-delay-ms",
-      description =
-          "Maximum backoff delay for gRPC reconnections in milliseconds (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private long maxBackoffDelayMs = LineaRlnValidatorConfiguration.V1_DEFAULT.maxBackoffDelayMs();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-default-epoch-for-quota",
-      description = "Default epoch identifier strategy (default: ${DEFAULT-VALUE})",
-      arity = "1")
-  private String defaultEpochForQuota =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.defaultEpochForQuota();
-
-  @CommandLine.Option(
-      names = "--plugin-linea-rln-jni-lib-path",
-      description =
-          "Optional explicit path to the rln_jni native library (default: system path lookup)",
-      arity = "1")
-  private Optional<String> rlnJniLibPath =
-      LineaRlnValidatorConfiguration.V1_DEFAULT.rlnJniLibPath();
-
-  @CommandLine.Mixin
-  private LineaSharedGaslessCliOptions sharedGaslessCliOptions =
-      LineaSharedGaslessCliOptions.create();
+  private long timeoutsMs = 5000L; // 5 seconds
 
   private LineaRlnValidatorCliOptions() {}
 
@@ -159,25 +83,46 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
 
   @Override
   public LineaRlnValidatorConfiguration toDomainObject() {
+    // Parse service endpoints
+    String[] proofParts = proofService.split(":");
+    String proofHost = proofParts[0];
+    int proofPort = Integer.parseInt(proofParts[1]);
+    
+    String[] karmaParts = karmaService.split(":");
+    String karmaHost = karmaParts[0];
+    int karmaPort = Integer.parseInt(karmaParts[1]);
+    
+    // Auto-detect TLS based on ports if not explicitly set
+    boolean shouldUseTls = useTls.orElse(proofPort == 443 || proofPort == 8443 || karmaPort == 443 || karmaPort == 8443);
+    
+    // Create shared gasless config with simplified settings
+    LineaSharedGaslessConfiguration sharedConfig = new LineaSharedGaslessConfiguration(
+        denyListPath,
+        60L, // 1 minute refresh interval (good default)
+        premiumGasThresholdGWei,
+        60L // 1 hour expiry (good default)
+    );
+    
     return new LineaRlnValidatorConfiguration(
         rlnValidationEnabled,
         verifyingKeyPath,
-        rlnProofServiceHost,
-        rlnProofServicePort,
-        rlnProofServiceUseTls,
-        rlnProofCacheMaxSize,
-        rlnProofCacheExpirySeconds,
-        rlnProofStreamRetries,
-        rlnProofStreamRetryIntervalMs,
-        rlnProofLocalWaitTimeoutMs,
-        sharedGaslessCliOptions.toDomainObject(),
-        karmaServiceHost,
-        karmaServicePort,
-        karmaServiceUseTls,
-        karmaServiceTimeoutMs,
-        exponentialBackoffEnabled,
-        maxBackoffDelayMs,
-        defaultEpochForQuota,
-        rlnJniLibPath);
+        proofHost,
+        proofPort,
+        shouldUseTls, // rlnProofServiceUseTls
+        10000L, // rlnProofCacheMaxSize (good default)
+        300L, // rlnProofCacheExpirySeconds (5 min, good default)
+        5, // rlnProofStreamRetries (good default)
+        5000L, // rlnProofStreamRetryIntervalMs (good default)
+        200L, // rlnProofLocalWaitTimeoutMs (good default)
+        sharedConfig,
+        karmaHost,
+        karmaPort,
+        shouldUseTls, // karmaServiceUseTls
+        timeoutsMs, // karmaServiceTimeoutMs
+        true, // exponentialBackoffEnabled (good default)
+        60000L, // maxBackoffDelayMs (1 min, good default)
+        "TIMESTAMP_1H", // defaultEpochForQuota (good default)
+        Optional.empty() // rlnJniLibPath (use system path)
+    );
   }
 }
