@@ -8,7 +8,7 @@ use ark_serialize::CanonicalDeserialize;
 use ark_std::vec::Vec;
 use ark_ff::PrimeField;
 
-use rln::protocol::{verify_proof, RLNProofValues}; // Assuming this is the correct path from zerokit/rln crate
+use rln::protocol::{verify_proof, RLNProofValues};
 use std::io::Cursor;
 use std::panic;
 

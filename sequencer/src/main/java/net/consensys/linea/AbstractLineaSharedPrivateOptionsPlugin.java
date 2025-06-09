@@ -186,33 +186,7 @@ public abstract class AbstractLineaSharedPrivateOptionsPlugin
     if (rlnConfig != null && rlnConfig.sharedGaslessConfig() != null) {
       return rlnConfig.sharedGaslessConfig();
     }
-    // Fallback or further logic might be needed if this isn't always sufficient.
-    // This is a guess based on LineaRlnValidatorCliOptions mixing it in.
-    // If other plugins also need it but don't mix it in, this could be an issue.
-    // The ideal fix is that LineaSharedGaslessCliOptions is *only* ever used as a Mixin
-    // and never registered directly if it causes duplicates.
 
-    // The most robust way to get it, if it's created by LineaRlnValidatorCliOptions, would be:
-    // return rlnValidatorConfiguration().sharedGaslessConfig();
-    // However, LineaRlnValidatorConfiguration might not always be present if the RLN plugin is not used.
-
-    // Let's try keeping the original way but acknowledge the risk if the KEY is gone.
-    // The getConfigurationByKey might be smart enough to find it via a mixin if the key is still valid somewhere.
-    // The safest approach is that anything needing LineaSharedGaslessConfiguration gets it from a CLI object
-    // that mixes LineaSharedGaslessCliOptions in.
-
-    // Given the duplicate error, the primary goal is to remove one registration source.
-    // If LineaSharedGaslessCliOptions is only used via mixins, it shouldn't have its own CONFIG_KEY registration in the map.
-    // If it IS intended to be a standalone config, then it shouldn't be a mixin anywhere, or mixins should be conditional.
-
-    // The most direct fix for the DuplicateOptionAnnotationsException is to remove one source of registration.
-    // Let's assume it's primarily a mixin.
-    // If this breaks sharedGaslessConfiguration(), we'll need to fix how it retrieves the config.
-    // One option is to make LineaSharedGaslessCliOptions NOT implement LineaCliOptions if it's only a mixin,
-    // or ensure its CONFIG_KEY is never used to put it in the map directly.
-
-    // For now, simply commenting out its direct addition to the configMap to resolve the duplicate.
-    // The sharedGaslessConfiguration() method below might fail and need adjustment.
     return (LineaSharedGaslessConfiguration)
         getConfigurationByKey(LineaSharedGaslessCliOptions.CONFIG_KEY).optionsConfig();
   }

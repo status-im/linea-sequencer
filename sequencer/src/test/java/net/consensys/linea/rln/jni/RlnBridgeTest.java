@@ -149,8 +149,6 @@ public class RlnBridgeTest {
 
       // For this test, we assume all proofs in rln_test_data.json are valid against the provided
       // VK.
-      // If you add invalid proofs to the JSON, you'll need a way to label them and assert
-      // accordingly.
       boolean isValid =
           RlnBridge.verifyRlnProof(verifyingKeyBytes, currentProofBytes, publicInputsHex);
       assertTrue(
