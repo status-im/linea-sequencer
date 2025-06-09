@@ -98,7 +98,8 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
 
     // Conditionally add RLN Validator
     if (rlnValidatorConf.rlnValidationEnabled()) {
-      validatorsList.add(new RlnVerifierValidator(rlnValidatorConf, blockchainService, sharedServiceManager.getDenyListManager()));
+      validatorsList.add(new RlnVerifierValidator(rlnValidatorConf, blockchainService, 
+          sharedServiceManager.getDenyListManager(), sharedServiceManager.getKarmaServiceClient()));
     }
 
     validatorsList.add(

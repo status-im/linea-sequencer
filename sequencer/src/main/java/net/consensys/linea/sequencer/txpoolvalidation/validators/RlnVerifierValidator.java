@@ -169,8 +169,8 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   private ManagedChannel proofServiceChannel;
   private RlnProofServiceGrpc.RlnProofServiceStub asyncProofStub;
   
-  // Shared karma service client
-  private KarmaServiceClient karmaServiceClient;
+  // Shared karma service client (injected dependency)
+  private final KarmaServiceClient karmaServiceClient;
   
   private ScheduledExecutorService grpcReconnectionScheduler;
   
@@ -186,34 +186,37 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
    * @param rlnConfig Configuration for RLN validation including service endpoints
    * @param blockchainService Blockchain service for accessing chain state
    * @param denyListManager Shared deny list manager for state consistency
+   * @param karmaServiceClient Shared karma service client for quota validation
    */
   public RlnVerifierValidator(
-      LineaRlnValidatorConfiguration rlnConfig, BlockchainService blockchainService, DenyListManager denyListManager) {
-    this(rlnConfig, blockchainService, denyListManager, null, null);
+      LineaRlnValidatorConfiguration rlnConfig, BlockchainService blockchainService, 
+      DenyListManager denyListManager, KarmaServiceClient karmaServiceClient) {
+    this(rlnConfig, blockchainService, denyListManager, karmaServiceClient, null);
   }
 
   /**
-   * Creates a new RLN Verifier Validator with optional pre-configured gRPC channels.
+   * Creates a new RLN Verifier Validator with shared services and optional pre-configured proof channel.
    * 
    * <p>This constructor is primarily intended for testing scenarios where
-   * mock gRPC channels need to be injected.
+   * a mock proof gRPC channel needs to be injected.
    * 
    * @param rlnConfig Configuration for RLN validation
    * @param blockchainService Blockchain service for accessing chain state
    * @param denyListManager Shared deny list manager for state consistency
-   * @param providedProofChannel Optional pre-configured proof service channel
-   * @param providedKarmaChannel Optional pre-configured karma service channel
+   * @param karmaServiceClient Shared karma service client for quota validation
+   * @param providedProofChannel Optional pre-configured proof service channel for testing
    */
   @VisibleForTesting
   RlnVerifierValidator(
       LineaRlnValidatorConfiguration rlnConfig,
       BlockchainService blockchainService,
       DenyListManager denyListManager,
-      ManagedChannel providedProofChannel,
-      ManagedChannel providedKarmaChannel) {
+      KarmaServiceClient karmaServiceClient,
+      ManagedChannel providedProofChannel) {
     this.rlnConfig = rlnConfig;
     this.blockchainService = blockchainService;
     this.denyListManager = denyListManager;
+    this.karmaServiceClient = karmaServiceClient;
     this.proofServiceChannel = providedProofChannel;
     
     // Initialize LRU cache with TTL support
@@ -247,7 +250,6 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       }
       
       initializeGrpcClients();
-      initializeKarmaServiceClient(providedKarmaChannel);
       startProofStreamSubscription();
       startProofCacheEvictionScheduler();
 
@@ -307,30 +309,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
   }
 
-  /**
-   * Initializes the shared Karma Service client.
-   * 
-   * <p>Creates a KarmaServiceClient configured for request-response karma
-   * validation with appropriate timeout and TLS settings.
-   * 
-   * @param providedChannel Optional pre-configured channel for testing
-   */
-  private void initializeKarmaServiceClient(ManagedChannel providedChannel) {
-    try {
-      this.karmaServiceClient = new KarmaServiceClient(
-          "RlnVerifierValidator",
-          rlnConfig.karmaServiceHost(),
-          rlnConfig.karmaServicePort(),
-          rlnConfig.karmaServiceUseTls(),
-          rlnConfig.karmaServiceTimeoutMs(),
-          providedChannel
-      );
-      LOG.info("Karma Service client initialized successfully for RLN validation");
-    } catch (Exception e) {
-      LOG.error("Failed to initialize Karma Service client: {}", e.getMessage(), e);
-      this.karmaServiceClient = null;
-    }
-  }
+
 
   /**
    * Starts the gRPC streaming subscription for receiving RLN proofs.

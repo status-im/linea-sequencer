@@ -247,9 +247,19 @@ class RlnVerifierValidatorTest {
     denyListManager = new DenyListManager("TestService", denyListFile.toString(), 
         LineaSharedGaslessConfiguration.DEFAULT_DENY_LIST_ENTRY_MAX_AGE_MINUTES, 0L);
 
+    // Create a mock karma service client for testing
+    KarmaServiceClient mockKarmaServiceClient = mock(KarmaServiceClient.class);
+    when(mockKarmaServiceClient.isAvailable()).thenReturn(true);
+    
+    // Setup default karma info response (user has quota available)
+    KarmaServiceClient.KarmaInfo defaultKarmaInfo = new KarmaServiceClient.KarmaInfo(
+        "STANDARD", 5, 100, "T:2024-01-01T12", 1000L);
+    when(mockKarmaServiceClient.fetchKarmaInfo(any(Address.class)))
+        .thenReturn(Optional.of(defaultKarmaInfo));
+
     RlnVerifierValidator tempValidator = null;
     try {
-      tempValidator = new RlnVerifierValidator(rlnConfig, blockchainService, denyListManager, inProcessChannel, null);
+      tempValidator = new RlnVerifierValidator(rlnConfig, blockchainService, denyListManager, mockKarmaServiceClient, inProcessChannel);
     } catch (Throwable t) { // Catch Throwable to get all details
       LOG.error("Error during RlnVerifierValidator construction (direct catch)", t);
       if (t.getCause() != null) {
@@ -746,8 +756,8 @@ class RlnVerifierValidatorTest {
     // Given: RLN validation is disabled
     when(rlnConfig.rlnValidationEnabled()).thenReturn(false);
     
-    // Create new validator with RLN disabled (no deny list manager needed when disabled)
-    RlnVerifierValidator disabledValidator = new RlnVerifierValidator(rlnConfig, blockchainService, null);
+    // Create new validator with RLN disabled (no shared services needed when disabled)
+    RlnVerifierValidator disabledValidator = new RlnVerifierValidator(rlnConfig, blockchainService, null, null);
     
     Transaction mockTransaction = mock(Transaction.class);
     when(mockTransaction.getSender()).thenReturn(Address.fromHexString("0x9999999999999999999999999999999999999999"));
