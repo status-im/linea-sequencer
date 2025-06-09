@@ -15,6 +15,8 @@ import net.consensys.linea.config.LineaProfitabilityConfiguration;
 import net.consensys.linea.config.LineaRpcConfiguration;
 import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.config.LineaTransactionPoolValidatorConfiguration;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Wei;
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
@@ -53,6 +55,8 @@ class LineaEstimateGasTest {
   @TempDir Path tempDir;
   private Path denyListFile;
   private LineaEstimateGas lineaEstimateGas;
+  private DenyListManager denyListManager;
+  private KarmaServiceClient karmaServiceClient;
 
   @BeforeEach
   void setUp() throws IOException {
@@ -79,6 +83,12 @@ class LineaEstimateGasTest {
     
     when(txValidatorConf.maxTxGasLimit()).thenReturn(30_000_000);
     
+    // Create shared services for testing
+    denyListManager = new DenyListManager("TestService", denyListFile.toString(), 60L, 0L);
+    // Note: KarmaServiceClient would normally be initialized with real gRPC config,
+    // but for unit tests we can pass null since we're testing configuration logic
+    karmaServiceClient = null;
+    
     // Create LineaEstimateGas instance
     lineaEstimateGas = new LineaEstimateGas(
         besuConfiguration,
@@ -96,7 +106,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // Then: Should initialize without errors
@@ -116,7 +128,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // Then: Should initialize without errors
@@ -136,7 +150,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // Then: Should handle missing file gracefully
@@ -156,28 +172,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
-    );
-    
-    // Then: Should initialize without errors
-    assertNotNull(lineaEstimateGas);
-  }
-
-  @Test
-  void testKarmaServiceConfiguration_shouldInitializeCorrectly() {
-    // Given: Karma service configuration
-    when(rpcConfiguration.karmaServiceHost()).thenReturn("karma.example.com");
-    when(rpcConfiguration.karmaServicePort()).thenReturn(9090);
-    when(rpcConfiguration.karmaServiceUseTls()).thenReturn(true);
-    when(rpcConfiguration.karmaServiceTimeoutMs()).thenReturn(10000L);
-    
-    // When: Initialize with karma service config
-    lineaEstimateGas.init(
-        rpcConfiguration,
-        txValidatorConf,
-        profitabilityConf,
-        Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // Then: Should initialize without errors
@@ -195,7 +192,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // Then: Should initialize without errors (with warnings logged)
@@ -210,7 +209,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // When: Stop the service
@@ -231,7 +232,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // Then: Should initialize without errors
@@ -249,25 +252,9 @@ class LineaEstimateGasTest {
         txValidatorConf,
         profitabilityConf,
         Map.of(),
-        l1L2BridgeConfiguration
-    );
-    
-    // Then: Should initialize without errors
-    assertNotNull(lineaEstimateGas);
-  }
-
-  @Test
-  void testDenyListRefreshInterval_shouldBeConfigurable() {
-    // Given: Custom refresh interval
-    when(sharedGaslessConfig.denyListRefreshSeconds()).thenReturn(30L);
-    
-    // When: Initialize with custom refresh interval
-    lineaEstimateGas.init(
-        rpcConfiguration,
-        txValidatorConf,
-        profitabilityConf,
-        Map.of(),
-        l1L2BridgeConfiguration
+        l1L2BridgeConfiguration,
+        denyListManager,
+        karmaServiceClient
     );
     
     // Then: Should initialize without errors

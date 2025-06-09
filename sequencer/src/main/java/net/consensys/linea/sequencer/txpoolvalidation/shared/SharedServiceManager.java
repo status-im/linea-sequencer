@@ -1,0 +1,169 @@
+package net.consensys.linea.sequencer.txpoolvalidation.shared;
+
+import java.io.Closeable;
+import java.io.IOException;
+
+import net.consensys.linea.config.LineaRlnValidatorConfiguration;
+import net.consensys.linea.config.LineaRpcConfiguration;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
+/**
+ * Centralized manager for shared services used by gasless transaction functionality.
+ * 
+ * <p>This manager ensures proper lifecycle management of shared services:
+ * <ul>
+ *   <li>DenyListManager: Single source of truth for deny list state</li>
+ *   <li>KarmaServiceClient: Shared gRPC client for karma service</li>
+ * </ul>
+ * 
+ * <p>The manager handles initialization, configuration, and proper cleanup
+ * of all shared resources to prevent resource leaks and ensure consistency.
+ * 
+ * @author Status Network Development Team
+ * @since 1.0
+ */
+public class SharedServiceManager implements Closeable {
+  private static final Logger LOG = LoggerFactory.getLogger(SharedServiceManager.class);
+
+  private DenyListManager denyListManager;
+  private KarmaServiceClient karmaServiceClient;
+  private final boolean gaslessEnabled;
+
+  /**
+   * Creates a new SharedServiceManager with the specified configuration.
+   * 
+   * @param rlnConfig RLN validator configuration
+   * @param rpcConfig RPC configuration (may be null if RPC features disabled)
+   */
+  public SharedServiceManager(LineaRlnValidatorConfiguration rlnConfig, LineaRpcConfiguration rpcConfig) {
+    this.gaslessEnabled = rlnConfig.rlnValidationEnabled() || 
+                         (rpcConfig != null && rpcConfig.gaslessTransactionsEnabled());
+    
+    if (gaslessEnabled) {
+      initializeSharedServices(rlnConfig, rpcConfig);
+    } else {
+      LOG.info("Gasless transactions disabled - shared services not initialized");
+    }
+  }
+
+  /**
+   * Initializes the shared services based on configuration.
+   */
+  private void initializeSharedServices(LineaRlnValidatorConfiguration rlnConfig, LineaRpcConfiguration rpcConfig) {
+    try {
+      // Initialize DenyListManager
+      if (rlnConfig.sharedGaslessConfig() != null) {
+        String denyListPath = rlnConfig.sharedGaslessConfig().denyListPath();
+        long entryMaxAgeMinutes = rlnConfig.denyListEntryMaxAgeMinutes();
+        long refreshIntervalSeconds = rlnConfig.sharedGaslessConfig().denyListRefreshSeconds();
+        
+        this.denyListManager = new DenyListManager(
+            "SharedServiceManager", 
+            denyListPath, 
+            entryMaxAgeMinutes, 
+            refreshIntervalSeconds
+        );
+        LOG.info("DenyListManager initialized successfully");
+      } else {
+        LOG.warn("Cannot initialize DenyListManager: sharedGaslessConfig is null");
+      }
+
+      // Initialize KarmaServiceClient
+      this.karmaServiceClient = new KarmaServiceClient(
+          "SharedServiceManager",
+          rlnConfig.karmaServiceHost(),
+          rlnConfig.karmaServicePort(),
+          rlnConfig.karmaServiceUseTls(),
+          rlnConfig.karmaServiceTimeoutMs()
+      );
+      LOG.info("KarmaServiceClient initialized successfully");
+      
+    } catch (Exception e) {
+      LOG.error("Failed to initialize shared services: {}", e.getMessage(), e);
+      // Clean up any partially initialized services
+      closeQuietly();
+      throw new IllegalStateException("Failed to initialize shared services", e);
+    }
+  }
+
+  /**
+   * Gets the shared DenyListManager instance.
+   * 
+   * @return DenyListManager instance, or null if gasless features are disabled
+   */
+  public DenyListManager getDenyListManager() {
+    return denyListManager;
+  }
+
+  /**
+   * Gets the shared KarmaServiceClient instance.
+   * 
+   * @return KarmaServiceClient instance, or null if gasless features are disabled
+   */
+  public KarmaServiceClient getKarmaServiceClient() {
+    return karmaServiceClient;
+  }
+
+  /**
+   * Checks if gasless features are enabled and shared services are available.
+   * 
+   * @return true if gasless features are enabled, false otherwise
+   */
+  public boolean isGaslessEnabled() {
+    return gaslessEnabled;
+  }
+
+  /**
+   * Closes all shared services and releases resources.
+   * 
+   * @throws IOException if there are issues during resource cleanup
+   */
+  @Override
+  public void close() throws IOException {
+    LOG.info("Closing shared services...");
+    
+    IOException firstException = null;
+    
+    if (karmaServiceClient != null) {
+      try {
+        karmaServiceClient.close();
+        LOG.info("KarmaServiceClient closed successfully");
+      } catch (IOException e) {
+        LOG.error("Error closing KarmaServiceClient: {}", e.getMessage(), e);
+        firstException = e;
+      }
+    }
+    
+    if (denyListManager != null) {
+      try {
+        denyListManager.close();
+        LOG.info("DenyListManager closed successfully");
+      } catch (IOException e) {
+        LOG.error("Error closing DenyListManager: {}", e.getMessage(), e);
+        if (firstException == null) {
+          firstException = e;
+        }
+      }
+    }
+    
+    LOG.info("Shared services closed");
+    
+    // Throw the first exception if any occurred
+    if (firstException != null) {
+      throw firstException;
+    }
+  }
+
+  /**
+   * Closes services quietly without throwing exceptions.
+   * Used for cleanup during initialization failures.
+   */
+  private void closeQuietly() {
+    try {
+      close();
+    } catch (IOException e) {
+      LOG.warn("Error during quiet close: {}", e.getMessage(), e);
+    }
+  }
+} 

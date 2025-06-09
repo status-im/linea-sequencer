@@ -22,6 +22,7 @@ import lombok.extern.slf4j.Slf4j;
 import net.consensys.linea.AbstractLineaRequiredPlugin;
 import net.consensys.linea.plugins.config.LineaL1L2BridgeSharedConfiguration;
 import net.consensys.linea.rpc.methods.LineaEstimateGas;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.SharedServiceManager;
 import org.hyperledger.besu.plugin.BesuPlugin;
 import org.hyperledger.besu.plugin.ServiceManager;
 import org.hyperledger.besu.plugin.services.TransactionSimulationService;
@@ -33,6 +34,7 @@ public class LineaEstimateGasEndpointPlugin extends AbstractLineaRequiredPlugin 
 
   private TransactionSimulationService transactionSimulationService;
   private LineaEstimateGas lineaEstimateGasMethod;
+  private SharedServiceManager sharedServiceManager;
 
   /**
    * Register the RPC service.
@@ -62,18 +64,38 @@ public class LineaEstimateGasEndpointPlugin extends AbstractLineaRequiredPlugin 
   @Override
   public void beforeExternalServices() {
     super.beforeExternalServices();
+    
+    // Initialize shared services
+    sharedServiceManager = new SharedServiceManager(rlnValidatorConfiguration(), lineaRpcConfiguration());
+    
     lineaEstimateGasMethod.init(
         lineaRpcConfiguration(),
         transactionPoolValidatorConfiguration(),
         profitabilityConfiguration(),
         createLimitModules(tracerConfiguration()),
-        l1L2BridgeSharedConfiguration());
+        l1L2BridgeSharedConfiguration(),
+        sharedServiceManager.getDenyListManager(),
+        sharedServiceManager.getKarmaServiceClient());
   }
 
   @Override
   public void doStart() {
     if (l1L2BridgeSharedConfiguration().equals(LineaL1L2BridgeSharedConfiguration.TEST_DEFAULT)) {
       throw new IllegalArgumentException("L1L2 bridge settings have not been defined.");
+    }
+  }
+
+  public void stop() {
+    if (lineaEstimateGasMethod != null) {
+      lineaEstimateGasMethod.stop();
+    }
+    
+    if (sharedServiceManager != null) {
+      try {
+        sharedServiceManager.close();
+      } catch (Exception e) {
+        log.error("Error closing shared service manager: {}", e.getMessage(), e);
+      }
     }
   }
 }

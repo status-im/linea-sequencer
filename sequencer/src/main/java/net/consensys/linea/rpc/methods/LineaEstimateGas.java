@@ -76,14 +76,10 @@ import org.hyperledger.besu.plugin.services.rpc.PluginRpcRequest;
 import org.hyperledger.besu.plugin.services.rpc.RpcMethodError;
 import org.hyperledger.besu.plugin.services.rpc.RpcResponseType;
 
-// Add gRPC imports for karma service
-import io.grpc.ManagedChannel;
-import io.grpc.ManagedChannelBuilder;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
-import net.consensys.linea.rln.proofs.grpc.GetKarmaRequest;
-import net.consensys.linea.rln.proofs.grpc.KarmaResponse;
-import net.consensys.linea.rln.proofs.grpc.KarmaServiceGrpc;
+// Add imports for shared services
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient.KarmaInfo;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
 
 @Slf4j
 public class LineaEstimateGas {
@@ -118,18 +114,15 @@ public class LineaEstimateGas {
   private ModuleLineCountValidator moduleLineCountValidator;
   private UInt256 maxTxGasLimit;
 
-  // New fields for gasless/deny list features
+  // New fields for gasless features
   private boolean gaslessTransactionsEnabled;
-  private Optional<String> denyListPathOpt;
   private LineaSharedGaslessConfiguration sharedGaslessConfig;
   private double premiumGasMultiplier;
   private boolean allowZeroGasEstimationForGasless;
-  private final Set<Address> denyListCache = ConcurrentHashMap.newKeySet();
-  private ScheduledExecutorService denyListRefreshScheduler;
 
-  // Add karma service fields
-  private ManagedChannel karmaServiceChannel;
-  private KarmaServiceGrpc.KarmaServiceBlockingStub karmaServiceStub;
+  // Shared services for gasless functionality
+  private DenyListManager denyListManager;
+  private KarmaServiceClient karmaServiceClient;
 
   public LineaEstimateGas(
       final BesuConfiguration besuConfiguration,
@@ -147,7 +140,9 @@ public class LineaEstimateGas {
       final LineaTransactionPoolValidatorConfiguration transactionValidatorConfiguration,
       final LineaProfitabilityConfiguration profitabilityConf,
       final Map<String, Integer> limitsMap,
-      final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration) {
+      final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration,
+      final DenyListManager denyListManager,
+      final KarmaServiceClient karmaServiceClient) {
     this.rpcConfiguration = rpcConfig;
     this.txValidatorConf = transactionValidatorConfiguration;
     this.profitabilityConf = profitabilityConf;
@@ -156,84 +151,34 @@ public class LineaEstimateGas {
     this.moduleLineCountValidator = new ModuleLineCountValidator(limitsMap);
     this.maxTxGasLimit = UInt256.valueOf(txValidatorConf.maxTxGasLimit());
 
-    // Initialize new gasless config fields
+    // Initialize gasless config fields
     this.gaslessTransactionsEnabled = rpcConfig.gaslessTransactionsEnabled();
     if (this.gaslessTransactionsEnabled) {
       this.sharedGaslessConfig = rpcConfig.sharedGaslessConfig();
-      if (this.sharedGaslessConfig != null) {
-        this.denyListPathOpt = Optional.ofNullable(this.sharedGaslessConfig.denyListPath());
-      } else {
-        this.denyListPathOpt = Optional.empty();
-        log.warn(
-            "LineaRpcConfiguration provided null sharedGaslessConfig while gasless transactions are enabled.");
+      if (this.sharedGaslessConfig == null) {
+        log.warn("LineaRpcConfiguration provided null sharedGaslessConfig while gasless transactions are enabled.");
       }
       this.premiumGasMultiplier = rpcConfig.premiumGasMultiplier();
       this.allowZeroGasEstimationForGasless = rpcConfig.allowZeroGasEstimationForGasless();
-      long refreshInterval = 0L;
-      if (this.sharedGaslessConfig != null) {
-        refreshInterval = this.sharedGaslessConfig.denyListRefreshSeconds();
-      } else {
-        // This case should ideally not happen if gaslessTransactionsEnabled is true
-        // and sharedGaslessConfig was intended to be mandatory.
-        // However, to prevent NullPointerException if logic changes or there's an oversight:
-        log.warn(
-            "sharedGaslessConfig is null even though gaslessTransactionsEnabled is true. Deny list refresh will be disabled.");
+      
+      // Inject shared services
+      this.denyListManager = denyListManager;
+      this.karmaServiceClient = karmaServiceClient;
+      
+      if (this.denyListManager == null) {
+        log.warn("DenyListManager not provided while gasless transactions are enabled. Deny list checks will be skipped.");
       }
-
-      if (this.denyListPathOpt.isEmpty()) {
-        log.warn(
-            "Gasless transactions enabled, but deny list path is not configured. Deny list checks will be skipped.");
-      } else {
-        loadDenyListFromFile();
-        if (refreshInterval > 0) {
-          denyListRefreshScheduler =
-              Executors.newSingleThreadScheduledExecutor(
-                  r -> new Thread(r, "linea-estimate-gas-deny-list-refresher"));
-          denyListRefreshScheduler.scheduleAtFixedRate(
-              this::loadDenyListFromFile, refreshInterval, refreshInterval, TimeUnit.SECONDS);
-          log.info(
-              "Scheduled deny list refresh every {} seconds from {}.",
-              refreshInterval,
-              denyListPathOpt.get());
-        }
+      if (this.karmaServiceClient == null) {
+        log.warn("KarmaServiceClient not provided while gasless transactions are enabled. Karma checks will be skipped.");
       }
       
-      // Initialize karma service if available
-      initializeKarmaService();
+      log.info("Gasless transaction features for linea_estimateGas are ENABLED with shared services.");
     } else {
       log.info("Gasless transaction features for linea_estimateGas are DISABLED.");
     }
   }
 
-  private void loadDenyListFromFile() {
-    denyListPathOpt.ifPresent(
-        path -> {
-          if (!Files.exists(Paths.get(path))) {
-            log.warn("Deny list file not found at {}, clearing cache.", path);
-            denyListCache.clear();
-            return;
-          }
-          Set<Address> newDenyList = new HashSet<>();
-          try (BufferedReader reader =
-              Files.newBufferedReader(Paths.get(path), StandardCharsets.UTF_8)) {
-            String line;
-            int count = 0;
-            while ((line = reader.readLine()) != null) {
-              try {
-                newDenyList.add(Address.fromHexString(line.trim()));
-                count++;
-              } catch (IllegalArgumentException e) {
-                log.warn("Invalid address format in deny list file '{}': '{}'", path, line.trim());
-              }
-            }
-            denyListCache.clear();
-            denyListCache.addAll(newDenyList);
-            log.info("Deny list reloaded successfully from {}. {} addresses cached.", path, count);
-          } catch (IOException e) {
-            log.error("Error loading deny list from {}: {}", path, e.getMessage(), e);
-          }
-        });
-  }
+
 
   public String getNamespace() {
     return "linea";
@@ -262,7 +207,9 @@ public class LineaEstimateGas {
       // --- Linea Gasless Logic Start ---
       if (gaslessTransactionsEnabled && callParameters.getSender().isPresent()) {
         Address sender = callParameters.getSender().get();
-        boolean isOnDenyList = denyListPathOpt.isPresent() && denyListCache.contains(sender);
+        
+        // Check if sender is on deny list (read-only operation)
+        boolean isOnDenyList = denyListManager != null && denyListManager.isDenied(sender);
 
         if (isOnDenyList) {
           log.info(
@@ -299,7 +246,7 @@ public class LineaEstimateGas {
               create(premiumGasEstimate), create(baseFee), create(estimatedPriorityFee));
         }
 
-        // Not on deny list - check if user has karma balance
+        // Not on deny list - check if user has karma balance for gasless eligibility
         Optional<KarmaInfo> karmaInfoOpt = fetchKarmaInfoFromService(sender);
         
         if (karmaInfoOpt.isPresent()) {
@@ -653,126 +600,26 @@ public class LineaEstimateGas {
     }
   }
 
-  // Method to stop the scheduler when the plugin stops (needs to be called from plugin's stop
-  // lifecycle)
+  // Method to stop when the plugin stops (needs to be called from plugin's stop lifecycle)
   public void stop() {
-    if (denyListRefreshScheduler != null) {
-      denyListRefreshScheduler.shutdown();
-      try {
-        if (!denyListRefreshScheduler.awaitTermination(5, TimeUnit.SECONDS)) {
-          denyListRefreshScheduler.shutdownNow();
-        }
-      } catch (InterruptedException e) {
-        denyListRefreshScheduler.shutdownNow();
-        Thread.currentThread().interrupt();
-      }
-      log.info("Deny list refresh scheduler stopped.");
-    }
-    
-    // Close karma service gRPC channel
-    if (karmaServiceChannel != null && !karmaServiceChannel.isShutdown()) {
-      karmaServiceChannel.shutdown();
-      try {
-        if (!karmaServiceChannel.awaitTermination(5, TimeUnit.SECONDS)) {
-          karmaServiceChannel.shutdownNow();
-        }
-      } catch (InterruptedException e) {
-        karmaServiceChannel.shutdownNow();
-        Thread.currentThread().interrupt();
-      }
-      log.info("Karma service gRPC channel stopped.");
-    }
+    // Note: DenyListManager and KarmaServiceClient are now shared services
+    // and should be closed by their managing component (e.g., the component
+    // that created them), not by individual consumers like LineaEstimateGas
+    log.info("LineaEstimateGas stopped. Shared services are managed externally.");
   }
 
-  /**
-   * Initializes the gRPC client for the Karma Service.
-   * Used to check if user has karma balance > 0 for gasless eligibility.
-   */
-  private void initializeKarmaService() {
-    if (rpcConfiguration == null) {
-      log.warn("Cannot initialize karma service: rpcConfiguration is null");
-      return;
-    }
-    
-    try {
-      String karmaHost = rpcConfiguration.karmaServiceHost();
-      int karmaPort = rpcConfiguration.karmaServicePort();
-      boolean useTls = rpcConfiguration.karmaServiceUseTls();
-      long timeoutMs = rpcConfiguration.karmaServiceTimeoutMs();
-      
-      log.info("Initializing Karma Service client for target: {}:{}", karmaHost, karmaPort);
-      
-      ManagedChannelBuilder<?> channelBuilder = ManagedChannelBuilder.forAddress(karmaHost, karmaPort);
-      
-      if (useTls) {
-        channelBuilder.useTransportSecurity();
-      } else {
-        channelBuilder.usePlaintext();
-      }
-      
-      this.karmaServiceChannel = channelBuilder.build();
-      this.karmaServiceStub = KarmaServiceGrpc.newBlockingStub(this.karmaServiceChannel)
-          .withDeadlineAfter(timeoutMs, TimeUnit.MILLISECONDS);
-      
-      log.info("Karma Service client initialized successfully for gasless transaction validation");
-      
-    } catch (Exception e) {
-      log.error("Failed to initialize Karma Service client: {}", e.getMessage(), e);
-      // Continue without karma service - will fall back to deny list only
-    }
-  }
+
 
   /**
-   * Represents user karma information for quota validation.
-   */
-  private record KarmaInfo(String tier, int epochTxCount, int dailyQuota, String epochId, long karmaBalance) {}
-
-  /**
-   * Fetches karma information for a user via gRPC Karma Service.
+   * Fetches karma information for a user via shared Karma Service client.
    * Used only to check if user has karma balance > 0 for gasless eligibility.
    */
   private Optional<KarmaInfo> fetchKarmaInfoFromService(Address userAddress) {
-    if (karmaServiceStub == null) {
-      log.debug("Karma service not configured. Cannot fetch karma info for {}", userAddress.toHexString());
+    if (karmaServiceClient == null || !karmaServiceClient.isAvailable()) {
+      log.debug("Karma service client not available. Cannot fetch karma info for {}", userAddress.toHexString());
       return Optional.empty();
     }
 
-    GetKarmaRequest request = GetKarmaRequest.newBuilder()
-        .setUserAddress(userAddress.toHexString())
-        .build();
-
-    try {
-      log.debug("Fetching karma info for user {} via gRPC", userAddress.toHexString());
-      KarmaResponse response = karmaServiceStub.getKarma(request);
-
-      log.debug("Karma service response for {}: tier={}, karmaBalance={}",
-               userAddress.toHexString(), response.getTier(), response.getKarmaBalance());
-
-      return Optional.of(new KarmaInfo(
-          response.getTier(),
-          response.getEpochTxCount(),
-          response.getDailyQuota(),
-          response.getEpochId(),
-          response.getKarmaBalance()
-      ));
-
-    } catch (StatusRuntimeException e) {
-      Status.Code code = e.getStatus().getCode();
-      if (code == Status.Code.NOT_FOUND) {
-        log.debug("User {} not found in karma service", userAddress.toHexString());
-        return Optional.empty();
-      } else if (code == Status.Code.DEADLINE_EXCEEDED) {
-        log.warn("Karma service timeout for user {}", userAddress.toHexString());
-        return Optional.empty();
-      } else {
-        log.error("Karma service gRPC error for user {}: {}", 
-                 userAddress.toHexString(), e.getMessage(), e);
-        return Optional.empty();
-      }
-    } catch (Exception e) {
-      log.error("Unexpected error calling karma service for user {}: {}", 
-               userAddress.toHexString(), e.getMessage(), e);
-      return Optional.empty();
-    }
+    return karmaServiceClient.fetchKarmaInfo(userAddress);
   }
 }

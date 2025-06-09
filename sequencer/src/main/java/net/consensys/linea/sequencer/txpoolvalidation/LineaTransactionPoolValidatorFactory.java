@@ -32,6 +32,7 @@ import net.consensys.linea.sequencer.txpoolvalidation.validators.GasLimitValidat
 import net.consensys.linea.sequencer.txpoolvalidation.validators.ProfitabilityValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.RlnVerifierValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.SimulationValidator;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.SharedServiceManager;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.plugin.services.BesuConfiguration;
 import org.hyperledger.besu.plugin.services.BlockchainService;
@@ -52,6 +53,7 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
   private final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration;
   private final Optional<JsonRpcManager> rejectedTxJsonRpcManager;
   private final LineaRlnValidatorConfiguration rlnValidatorConf;
+  private final SharedServiceManager sharedServiceManager;
 
   public LineaTransactionPoolValidatorFactory(
       final BesuConfiguration besuConfiguration,
@@ -63,7 +65,8 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
       final Map<String, Integer> moduleLineLimitsMap,
       final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration,
       final Optional<JsonRpcManager> rejectedTxJsonRpcManager,
-      final LineaRlnValidatorConfiguration rlnValidatorConf) {
+      final LineaRlnValidatorConfiguration rlnValidatorConf,
+      final SharedServiceManager sharedServiceManager) {
     this.besuConfiguration = besuConfiguration;
     this.blockchainService = blockchainService;
     this.transactionSimulationService = transactionSimulationService;
@@ -74,6 +77,7 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
     this.l1L2BridgeConfiguration = l1L2BridgeConfiguration;
     this.rejectedTxJsonRpcManager = rejectedTxJsonRpcManager;
     this.rlnValidatorConf = rlnValidatorConf;
+    this.sharedServiceManager = sharedServiceManager;
   }
 
   /**
@@ -94,7 +98,7 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
 
     // Conditionally add RLN Validator
     if (rlnValidatorConf.rlnValidationEnabled()) {
-      validatorsList.add(new RlnVerifierValidator(rlnValidatorConf, blockchainService));
+      validatorsList.add(new RlnVerifierValidator(rlnValidatorConf, blockchainService, sharedServiceManager.getDenyListManager()));
     }
 
     validatorsList.add(

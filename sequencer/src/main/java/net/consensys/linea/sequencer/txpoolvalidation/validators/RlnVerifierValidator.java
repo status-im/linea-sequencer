@@ -36,17 +36,15 @@ import java.util.stream.Collectors;
 import com.google.common.annotations.VisibleForTesting;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
-import io.grpc.Status;
-import io.grpc.StatusRuntimeException;
 import io.grpc.stub.StreamObserver;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.rln.jni.RlnBridge;
-import net.consensys.linea.rln.proofs.grpc.GetKarmaRequest;
-import net.consensys.linea.rln.proofs.grpc.KarmaResponse;
-import net.consensys.linea.rln.proofs.grpc.KarmaServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.ProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient.KarmaInfo;
+import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Transaction;
@@ -114,9 +112,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   private final LineaRlnValidatorConfiguration rlnConfig;
   private final BlockchainService blockchainService;
   private final byte[] rlnVerifyingKeyBytes;
-  private final Map<Address, Instant> denyList = new ConcurrentHashMap<>();
-  private final Path denyListFilePath;
-  private ScheduledExecutorService denyListRefreshScheduler;
+  private final DenyListManager denyListManager;
   private ScheduledExecutorService proofCacheEvictionScheduler;
 
   /**
@@ -173,9 +169,8 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   private ManagedChannel proofServiceChannel;
   private RlnProofServiceGrpc.RlnProofServiceStub asyncProofStub;
   
-  // gRPC client members for karma service  
-  private ManagedChannel karmaServiceChannel;
-  private KarmaServiceGrpc.KarmaServiceBlockingStub karmaServiceStub;
+  // Shared karma service client
+  private KarmaServiceClient karmaServiceClient;
   
   private ScheduledExecutorService grpcReconnectionScheduler;
   
@@ -183,26 +178,18 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   private final AtomicInteger proofStreamRetryCount = new AtomicInteger(0);
   private volatile long lastProofStreamRetryTime = 0;
 
-  /**
-   * Represents user karma information retrieved from the Karma Service.
-   * 
-   * @param tier User's karma tier (e.g., "Basic", "Active", "Regular")
-   * @param epochTxCount Number of transactions used in current epoch
-   * @param dailyQuota Daily transaction quota for this tier
-   * @param epochId Current epoch identifier from karma service
-   * @param karmaBalance User's total karma balance
-   */
-  private record KarmaInfo(String tier, int epochTxCount, int dailyQuota, String epochId, long karmaBalance) {}
+
 
   /**
    * Creates a new RLN Verifier Validator with default gRPC channel management.
    * 
    * @param rlnConfig Configuration for RLN validation including service endpoints
    * @param blockchainService Blockchain service for accessing chain state
+   * @param denyListManager Shared deny list manager for state consistency
    */
   public RlnVerifierValidator(
-      LineaRlnValidatorConfiguration rlnConfig, BlockchainService blockchainService) {
-    this(rlnConfig, blockchainService, null, null);
+      LineaRlnValidatorConfiguration rlnConfig, BlockchainService blockchainService, DenyListManager denyListManager) {
+    this(rlnConfig, blockchainService, denyListManager, null, null);
   }
 
   /**
@@ -213,6 +200,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
    * 
    * @param rlnConfig Configuration for RLN validation
    * @param blockchainService Blockchain service for accessing chain state
+   * @param denyListManager Shared deny list manager for state consistency
    * @param providedProofChannel Optional pre-configured proof service channel
    * @param providedKarmaChannel Optional pre-configured karma service channel
    */
@@ -220,21 +208,13 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   RlnVerifierValidator(
       LineaRlnValidatorConfiguration rlnConfig,
       BlockchainService blockchainService,
+      DenyListManager denyListManager,
       ManagedChannel providedProofChannel,
       ManagedChannel providedKarmaChannel) {
     this.rlnConfig = rlnConfig;
     this.blockchainService = blockchainService;
+    this.denyListManager = denyListManager;
     this.proofServiceChannel = providedProofChannel;
-    this.karmaServiceChannel = providedKarmaChannel;
-
-    String pathString = rlnConfig.sharedGaslessConfig().denyListPath();
-    if (pathString == null) {
-      LOG.error(
-          "CRITICAL: rlnConfig.sharedGaslessConfig().denyListPath() returned null during RlnVerifierValidator construction!");
-      throw new IllegalStateException(
-          "denyListPath from sharedGaslessConfig cannot be null, check rlnConfig stubbing in tests or real configuration.");
-    }
-    this.denyListFilePath = Paths.get(pathString);
     
     // Initialize LRU cache with TTL support
     this.rlnProofCache = new LRUProofCache(
@@ -242,8 +222,13 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         rlnConfig.rlnProofCacheExpirySeconds()
     );
 
-    if (rlnConfig.rlnValidationEnabled()) {
+          if (rlnConfig.rlnValidationEnabled()) {
       LOG.info("RLN Validator is ENABLED.");
+      
+      if (denyListManager == null) {
+        throw new IllegalArgumentException("DenyListManager cannot be null when RLN validation is enabled");
+      }
+      
       try {
         this.rlnVerifyingKeyBytes = Files.readAllBytes(Paths.get(rlnConfig.verifyingKeyPath()));
         LOG.info("RLN Verifying Key loaded successfully from {}.", rlnConfig.verifyingKeyPath());
@@ -261,9 +246,8 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
             "Failed to initialize RlnVerifierValidator: JNI linkage error", e);
       }
       
-      loadDenyListFromFile();
-      startDenyListRefreshScheduler();
       initializeGrpcClients();
+      initializeKarmaServiceClient(providedKarmaChannel);
       startProofStreamSubscription();
       startProofCacheEvictionScheduler();
 
@@ -274,18 +258,15 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   }
 
   /**
-   * Initializes gRPC client connections for both proof and karma services.
+   * Initializes gRPC client connection for proof service.
    * 
-   * <p>Creates managed channels with appropriate TLS configuration based
+   * <p>Creates managed channel with appropriate TLS configuration based
    * on the provided configuration. Supports both injected channels (for testing)
    * and dynamically created channels.
    */
   private void initializeGrpcClients() {
     // Initialize proof service client
     initializeProofServiceClient();
-    
-    // Initialize karma service client
-    initializeKarmaServiceClient();
   }
 
   /**
@@ -327,41 +308,27 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   }
 
   /**
-   * Initializes the gRPC client for the Karma Service.
+   * Initializes the shared Karma Service client.
    * 
-   * <p>Creates a managed channel configured for request-response karma
+   * <p>Creates a KarmaServiceClient configured for request-response karma
    * validation with appropriate timeout and TLS settings.
+   * 
+   * @param providedChannel Optional pre-configured channel for testing
    */
-  private void initializeKarmaServiceClient() {
-    boolean wasChannelProvided =
-        (this.karmaServiceChannel != null && !this.karmaServiceChannel.isShutdown());
-
-    if (wasChannelProvided) {
-      LOG.info("Using pre-configured ManagedChannel for Karma Service client.");
-    } else {
-      LOG.info("Creating new ManagedChannel for Karma Service client based on configuration.");
-      ManagedChannelBuilder<?> channelBuilder =
-          ManagedChannelBuilder.forAddress(
-              rlnConfig.karmaServiceHost(), rlnConfig.karmaServicePort());
-
-      if (rlnConfig.karmaServiceUseTls()) {
-        channelBuilder.useTransportSecurity();
-      } else {
-        channelBuilder.usePlaintext();
-      }
-      this.karmaServiceChannel = channelBuilder.build();
-    }
-
-    this.karmaServiceStub = KarmaServiceGrpc.newBlockingStub(this.karmaServiceChannel)
-        .withDeadlineAfter(rlnConfig.karmaServiceTimeoutMs(), TimeUnit.MILLISECONDS);
-
-    if (wasChannelProvided) {
-      LOG.info("Karma Service client initialized with injected ManagedChannel.");
-    } else {
-      LOG.info(
-          "Karma Service client initialized for target: {}:{}",
+  private void initializeKarmaServiceClient(ManagedChannel providedChannel) {
+    try {
+      this.karmaServiceClient = new KarmaServiceClient(
+          "RlnVerifierValidator",
           rlnConfig.karmaServiceHost(),
-          rlnConfig.karmaServicePort());
+          rlnConfig.karmaServicePort(),
+          rlnConfig.karmaServiceUseTls(),
+          rlnConfig.karmaServiceTimeoutMs(),
+          providedChannel
+      );
+      LOG.info("Karma Service client initialized successfully for RLN validation");
+    } catch (Exception e) {
+      LOG.error("Failed to initialize Karma Service client: {}", e.getMessage(), e);
+      this.karmaServiceClient = null;
     }
   }
 
@@ -473,36 +440,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         TimeUnit.MILLISECONDS);
   }
 
-  /**
-   * Starts the scheduled task for deny list file refresh.
-   * 
-   * <p>Periodically reloads the deny list from the configured file path
-   * to pick up external modifications and perform TTL-based cleanup.
-   */
-  private void startDenyListRefreshScheduler() {
-    long refreshIntervalSeconds = rlnConfig.denyListRefreshSeconds();
-    if (refreshIntervalSeconds > 0) {
-      denyListRefreshScheduler =
-          Executors.newSingleThreadScheduledExecutor(
-              r -> {
-                Thread t = Executors.defaultThreadFactory().newThread(r);
-                t.setName("RlnVerifierValidator-DenyListRefresh");
-                t.setDaemon(true);
-                return t;
-              });
-      denyListRefreshScheduler.scheduleAtFixedRate(
-          this::loadDenyListFromFile,
-          refreshIntervalSeconds,
-          refreshIntervalSeconds,
-          TimeUnit.SECONDS);
-      LOG.info(
-          "Scheduled RLN deny list refresh every {} seconds from {}.",
-          refreshIntervalSeconds,
-          denyListFilePath);
-    } else {
-      LOG.info("RLN deny list auto-refresh is DISABLED (refresh interval <= 0).");
-    }
-  }
+
 
   /**
    * Starts the scheduled task for proof cache eviction.
@@ -535,115 +473,12 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   }
 
   /**
-   * Loads the deny list from the configured file path.
-   * 
-   * <p>Reads deny list entries from file in format: "address,timestamp"
-   * and automatically removes expired entries based on configured TTL.
-   * Updates are atomic to prevent inconsistent state during concurrent access.
-   */
-  private void loadDenyListFromFile() {
-    if (!Files.exists(denyListFilePath)) {
-      LOG.info("Deny list file not found at {}, starting with an empty list.", denyListFilePath);
-      denyList.clear();
-      return;
-    }
-    Map<Address, Instant> newDenyListCache = new ConcurrentHashMap<>();
-    Instant now = Instant.now();
-    long maxAgeMillis = TimeUnit.MINUTES.toMillis(rlnConfig.denyListEntryMaxAgeMinutes());
-    boolean entriesPruned = false;
-
-    try (BufferedReader reader =
-        Files.newBufferedReader(denyListFilePath, StandardCharsets.UTF_8)) {
-      String line;
-      while ((line = reader.readLine()) != null) {
-        String[] parts = line.split(",", 2);
-        if (parts.length == 2) {
-          try {
-            Address address = Address.fromHexString(parts[0].trim());
-            Instant timestamp = Instant.parse(parts[1].trim());
-            if (now.toEpochMilli() - timestamp.toEpochMilli() < maxAgeMillis) {
-              newDenyListCache.put(address, timestamp);
-            } else {
-              entriesPruned = true;
-              LOG.debug(
-                  "Expired deny list entry for {} (added at {}) removed during load.",
-                  address,
-                  timestamp);
-            }
-          } catch (IllegalArgumentException | DateTimeParseException e) {
-            LOG.warn(
-                "Invalid entry in deny list file: '{}'. Skipping. Error: {}", line, e.getMessage());
-          }
-        } else {
-          LOG.warn("Malformed line in deny list file (expected 'address,timestamp'): '{}'", line);
-        }
-      }
-      denyList.clear();
-      denyList.putAll(newDenyListCache);
-      LOG.info(
-          "Deny list loaded successfully from {}. {} active entries.",
-          denyListFilePath,
-          denyList.size());
-      if (entriesPruned) {
-        saveDenyListToFile();
-      }
-    } catch (IOException e) {
-      LOG.error("Error loading deny list from {}: {}", denyListFilePath, e.getMessage(), e);
-    }
-  }
-
-  /**
-   * Atomically saves the current deny list state to file.
-   * 
-   * <p>Uses atomic file operations (write to temp, then move) to ensure
-   * file consistency and prevent corruption during concurrent access.
-   */
-  private void saveDenyListToFile() {
-    Map<Address, Instant> denyListSnapshot = new HashMap<>(denyList);
-    List<String> entriesAsString =
-        denyListSnapshot.entrySet().stream()
-            .map(
-                entry ->
-                    entry.getKey().toHexString().toLowerCase() + "," + entry.getValue().toString())
-            .sorted()
-            .collect(Collectors.toList());
-    try {
-      Path tempFilePath =
-          denyListFilePath
-              .getParent()
-              .resolve(denyListFilePath.getFileName().toString() + ".tmp_save");
-      Files.write(
-          tempFilePath,
-          entriesAsString,
-          StandardCharsets.UTF_8,
-          StandardOpenOption.CREATE,
-          StandardOpenOption.TRUNCATE_EXISTING);
-      Files.move(
-          tempFilePath,
-          denyListFilePath,
-          StandardCopyOption.REPLACE_EXISTING,
-          StandardCopyOption.ATOMIC_MOVE);
-      LOG.debug(
-          "Deny list saved to file {} with {} entries.", denyListFilePath, entriesAsString.size());
-    } catch (IOException e) {
-      LOG.error("Error saving deny list to file {}: {}", denyListFilePath, e.getMessage(), e);
-    }
-  }
-
-  /**
    * Adds an address to the deny list with current timestamp.
    * 
    * @param address The address to add to the deny list
    */
   void addToDenyList(final Address address) {
-    if (denyList.put(address, Instant.now()) == null) {
-      saveDenyListToFile();
-      LOG.info(
-          "Address {} added to deny list at {}. Cache size: {}",
-          address.toHexString(),
-          denyList.get(address),
-          denyList.size());
-    }
+    denyListManager.addToDenyList(address);
   }
 
   /**
@@ -653,15 +488,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
    * @return true if the address was in the list and removed, false otherwise
    */
   boolean removeFromDenyList(final Address address) {
-    if (denyList.remove(address) != null) {
-      saveDenyListToFile();
-      LOG.info(
-          "Address {} removed from deny list. Cache size: {}",
-          address.toHexString(),
-          denyList.size());
-      return true;
-    }
-    return false;
+    return denyListManager.removeFromDenyList(address);
   }
 
   /**
@@ -697,59 +524,18 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   }
 
   /**
-   * Fetches karma information for a user via gRPC Karma Service.
-   * 
-   * <p>Retrieves current karma status including tier, quota, and usage
-   * information for the specified user address. Includes proper error
-   * handling for gRPC failures and timeouts.
+   * Fetches karma information for a user via shared Karma Service client.
    * 
    * @param userAddress The user address to query karma information for
    * @return Optional containing karma info if successful, empty on failure
    */
   private Optional<KarmaInfo> fetchKarmaInfoFromService(Address userAddress) {
-    if (karmaServiceStub == null) {
-      LOG.warn("Karma service not configured. Cannot fetch karma info.");
+    if (karmaServiceClient == null || !karmaServiceClient.isAvailable()) {
+      LOG.warn("Karma service client not available. Cannot fetch karma info.");
       return Optional.empty();
     }
 
-    GetKarmaRequest request = GetKarmaRequest.newBuilder()
-        .setUserAddress(userAddress.toHexString())
-        .build();
-
-    try {
-      LOG.debug("Fetching karma info for user {} via gRPC", userAddress.toHexString());
-      KarmaResponse response = karmaServiceStub.getKarma(request);
-
-      LOG.debug("Karma service response for {}: tier={}, epochTxCount={}, dailyQuota={}, epochId={}",
-               userAddress.toHexString(), response.getTier(), response.getEpochTxCount(),
-               response.getDailyQuota(), response.getEpochId());
-
-      return Optional.of(new KarmaInfo(
-          response.getTier(),
-          response.getEpochTxCount(),
-          response.getDailyQuota(),
-          response.getEpochId(),
-          response.getKarmaBalance()
-      ));
-
-    } catch (StatusRuntimeException e) {
-      Status.Code code = e.getStatus().getCode();
-      if (code == Status.Code.NOT_FOUND) {
-        LOG.debug("User {} not found in karma service", userAddress.toHexString());
-        return Optional.empty();
-      } else if (code == Status.Code.DEADLINE_EXCEEDED) {
-        LOG.warn("Karma service timeout for user {}", userAddress.toHexString());
-        return Optional.empty();
-      } else {
-        LOG.error("Karma service gRPC error for user {}: {}", 
-                 userAddress.toHexString(), e.getMessage(), e);
-        return Optional.empty();
-      }
-    } catch (Exception e) {
-      LOG.error("Unexpected error calling karma service for user {}: {}", 
-               userAddress.toHexString(), e.getMessage(), e);
-      return Optional.empty();
-    }
+    return karmaServiceClient.fetchKarmaInfo(userAddress);
   }
 
   /**
@@ -785,44 +571,36 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     final String txHashString = txHash.toHexString();
 
     // 1. Deny List Check
-    Instant deniedUntil = denyList.get(sender);
-    if (deniedUntil != null) {
-      if (Instant.now().isAfter(deniedUntil)) {
-        denyList.remove(sender);
-        saveDenyListToFile(); // Persist removal
-        LOG.info("Removed expired deny list entry for sender: {}", sender.toHexString());
-      } else {
-        // User is actively denied. Check for premium gas.
-        long premiumThresholdWei = rlnConfig.premiumGasPriceThresholdWei();
-        Wei effectiveGasPrice =
-            transaction
-                .getGasPrice()
-                .map(q -> Wei.of(q.getAsBigInteger()))
-                .orElseGet(
-                    () ->
-                        transaction
-                            .getMaxFeePerGas()
-                            .map(q -> Wei.of(q.getAsBigInteger()))
-                            .orElse(Wei.ZERO));
+    if (denyListManager.isDenied(sender)) {
+      // User is actively denied. Check for premium gas.
+      long premiumThresholdWei = rlnConfig.premiumGasPriceThresholdWei();
+      Wei effectiveGasPrice =
+          transaction
+              .getGasPrice()
+              .map(q -> Wei.of(q.getAsBigInteger()))
+              .orElseGet(
+                  () ->
+                      transaction
+                          .getMaxFeePerGas()
+                          .map(q -> Wei.of(q.getAsBigInteger()))
+                          .orElse(Wei.ZERO));
 
-        if (effectiveGasPrice.getAsBigInteger().compareTo(BigInteger.valueOf(premiumThresholdWei))
-            >= 0) {
-          denyList.remove(sender);
-          saveDenyListToFile(); // Persist removal
-          LOG.info(
-              "Sender {} was on deny list but paid premium gas ({} Wei >= {} Wei). Allowing and removing from deny list.",
-              sender.toHexString(),
-              effectiveGasPrice,
-              premiumThresholdWei);
-        } else {
-          LOG.warn(
-              "Sender {} is on deny list. Transaction {} rejected. Effective gas price {} Wei < {} Wei.",
-              sender.toHexString(),
-              txHashString,
-              effectiveGasPrice,
-              premiumThresholdWei);
-          return Optional.of("Sender on deny list, premium gas not met.");
-        }
+      if (effectiveGasPrice.getAsBigInteger().compareTo(BigInteger.valueOf(premiumThresholdWei))
+          >= 0) {
+        denyListManager.removeFromDenyList(sender);
+        LOG.info(
+            "Sender {} was on deny list but paid premium gas ({} Wei >= {} Wei). Allowing and removing from deny list.",
+            sender.toHexString(),
+            effectiveGasPrice,
+            premiumThresholdWei);
+      } else {
+        LOG.warn(
+            "Sender {} is on deny list. Transaction {} rejected. Effective gas price {} Wei < {} Wei.",
+            sender.toHexString(),
+            txHashString,
+            effectiveGasPrice,
+            premiumThresholdWei);
+        return Optional.of("Sender on deny list, premium gas not met.");
       }
     }
 
@@ -963,22 +741,15 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       }
     }
     
-    if (karmaServiceChannel != null && !karmaServiceChannel.isShutdown()) {
-      karmaServiceChannel.shutdown();
+    if (karmaServiceClient != null) {
       try {
-        if (!karmaServiceChannel.awaitTermination(5, TimeUnit.SECONDS)) {
-          karmaServiceChannel.shutdownNow();
-        }
-      } catch (InterruptedException e) {
-        karmaServiceChannel.shutdownNow();
-        Thread.currentThread().interrupt();
+        karmaServiceClient.close();
+      } catch (IOException e) {
+        LOG.warn("Error closing karma service client: {}", e.getMessage(), e);
       }
     }
     
     // Shutdown schedulers
-    if (denyListRefreshScheduler != null && !denyListRefreshScheduler.isShutdown()) {
-      denyListRefreshScheduler.shutdownNow();
-    }
     if (proofCacheEvictionScheduler != null && !proofCacheEvictionScheduler.isShutdown()) {
       proofCacheEvictionScheduler.shutdownNow();
     }
@@ -993,21 +764,17 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   
   @VisibleForTesting
   void addToDenyListForTest(Address user, Instant addedAt) {
-    denyList.put(user, addedAt);
-    saveDenyListToFile();
+    denyListManager.addToDenyList(user);
   }
 
   @VisibleForTesting
   boolean isDeniedForTest(Address user) {
-    Instant addedAt = denyList.get(user);
-    if (addedAt == null) return false;
-    long maxAgeMillis = TimeUnit.MINUTES.toMillis(rlnConfig.denyListEntryMaxAgeMinutes());
-    return (Instant.now().toEpochMilli() - addedAt.toEpochMilli()) < maxAgeMillis;
+    return denyListManager.isDenied(user);
   }
 
   @VisibleForTesting
   void loadDenyListFromFileForTest() {
-    this.loadDenyListFromFile();
+    denyListManager.reloadFromFile();
   }
 
   @VisibleForTesting
