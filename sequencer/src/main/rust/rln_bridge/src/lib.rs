@@ -4,11 +4,11 @@ use jni::sys::{jboolean, jbyteArray, JNI_TRUE, JNI_FALSE};
 
 use ark_bn254::{Bn254, Fr};
 use ark_groth16::{Proof, VerifyingKey};
-use ark_serialize::CanonicalDeserialize;
+use ark_serialize::{CanonicalDeserialize, CanonicalSerialize};
 use ark_std::vec::Vec;
 use ark_ff::PrimeField;
 
-use rln::protocol::{verify_proof, RLNProofValues};
+use rln::protocol::{verify_proof, RLNProofValues, deserialize_proof_values};
 use std::io::Cursor;
 use std::panic;
 
@@ -31,6 +31,13 @@ fn fr_from_hex(hex_str: &str) -> Result<Fr, String> {
     Ok(Fr::from_be_bytes_mod_order(&bytes))
 }
 
+// Helper function to convert Fr to hex string
+fn fr_to_hex(fr: &Fr) -> String {
+    let mut bytes = [0u8; 32];
+    fr.serialize_compressed(&mut bytes[..]).expect("Failed to serialize Fr");
+    format!("0x{}", hex::encode(bytes))
+}
+
 // Helper function to convert Java byte array to Rust Vec<u8>
 fn java_byte_array_to_vec<'local>(env: &JNIEnv<'local>, array: jbyteArray) -> Result<Vec<u8>, jni::errors::Error> {
     env.convert_byte_array(unsafe { JByteArray::from_raw(array) })
@@ -39,6 +46,17 @@ fn java_byte_array_to_vec<'local>(env: &JNIEnv<'local>, array: jbyteArray) -> Re
 // Helper to throw a Java RuntimeException from Rust
 fn throw_exception(env: &mut JNIEnv, message: &str) {
     let _ = env.throw_new("java/lang/RuntimeException", message);
+}
+
+// Helper function to create Java string array from Rust Vec<String>
+fn create_java_string_array<'local>(env: &mut JNIEnv<'local>, strings: Vec<String>) -> Result<JObjectArray<'local>, jni::errors::Error> {
+    let string_class = env.find_class("java/lang/String")?;
+    let array = env.new_object_array(strings.len() as i32, &string_class, JString::from(env.new_string("")?))?;
+    for (i, s) in strings.iter().enumerate() {
+        let jstring = env.new_string(s)?;
+        env.set_object_array_element(&array, i as i32, jstring)?;
+    }
+    Ok(array)
 }
 
 // JNI function, name updated to match the new Java class and package
@@ -151,6 +169,113 @@ pub extern "system" fn Java_net_consensys_linea_rln_jni_RlnBridge_verifyRlnProof
             };
             throw_exception(&mut env, &format!("Rust panic: {}", panic_msg));
             JNI_FALSE
+        }
+    }
+}
+
+// New JNI function to parse combined proof format and extract proof values
+#[no_mangle]
+pub extern "system" fn Java_net_consensys_linea_rln_jni_RlnBridge_parseAndVerifyRlnProof<'local>(
+    mut env: JNIEnv<'local>,
+    _class: JClass<'local>,
+    verifying_key_jbytes: jbyteArray,
+    combined_proof_jbytes: jbyteArray,
+    current_epoch_hex: JString<'local>,
+) -> JObjectArray<'local> {
+    // Convert JNI inputs to Rust types
+    let vk_bytes: Vec<u8>;
+    match java_byte_array_to_vec(&env, verifying_key_jbytes) {
+        Ok(b) => vk_bytes = b,
+        Err(e) => {
+            throw_exception(&mut env, &format!("Failed to convert verifying key bytes: {}", e));
+            return JObjectArray::default();
+        }
+    }
+
+    let combined_proof_bytes: Vec<u8>;
+    match java_byte_array_to_vec(&env, combined_proof_jbytes) {
+        Ok(b) => combined_proof_bytes = b,
+        Err(e) => {
+            throw_exception(&mut env, &format!("Failed to convert combined proof bytes: {}", e));
+            return JObjectArray::default();
+        }
+    }
+
+    let current_epoch_string: String = match env.get_string(&current_epoch_hex) {
+        Ok(s) => s.into(),
+        Err(e) => {
+            throw_exception(&mut env, &format!("Failed to convert current epoch JString: {}", e));
+            return JObjectArray::default();
+        }
+    };
+
+    // Parse and verify the proof
+    let result = panic::catch_unwind(|| -> Result<Vec<String>, String> {
+        let vk = VerifyingKey::<Bn254>::deserialize_compressed(&mut Cursor::new(vk_bytes))
+            .map_err(|e| format!("Failed to deserialize VK: {}", e))?;
+
+        // Parse the combined proof format: proof + proof_values
+        let mut proof_cursor = Cursor::new(&combined_proof_bytes);
+        let proof = Proof::<Bn254>::deserialize_compressed(&mut proof_cursor)
+            .map_err(|e| format!("Failed to deserialize proof: {}", e))?;
+
+        let position = proof_cursor.position() as usize;
+        let proof_values_bytes = &combined_proof_bytes[position..];
+        let (proof_values, _) = deserialize_proof_values(proof_values_bytes);
+
+        // Verify the epoch matches current epoch
+        let current_epoch_fr = fr_from_hex(&current_epoch_string)?;
+        if proof_values.external_nullifier != current_epoch_fr {
+            return Err(format!(
+                "Epoch mismatch: proof epoch {} != current epoch {}",
+                fr_to_hex(&proof_values.external_nullifier),
+                current_epoch_string
+            ));
+        }
+
+        // Verify the proof
+        match verify_proof(&vk, &proof, &proof_values) {
+            Ok(true) => {
+                // Return the extracted values as hex strings
+                // Array format: [share_x, share_y, epoch, root, nullifier, verification_result]
+                Ok(vec![
+                    fr_to_hex(&proof_values.x),
+                    fr_to_hex(&proof_values.y),
+                    fr_to_hex(&proof_values.external_nullifier),
+                    fr_to_hex(&proof_values.root),
+                    fr_to_hex(&proof_values.nullifier),
+                    "true".to_string(), // verification_result
+                ])
+            }
+            Ok(false) => Err("Proof verification failed".to_string()),
+            Err(e) => Err(format!("Proof verification error: {:?}", e)),
+        }
+    });
+
+    match result {
+        Ok(Ok(string_array)) => {
+            match create_java_string_array(&mut env, string_array) {
+                Ok(java_array) => java_array,
+                Err(e) => {
+                    throw_exception(&mut env, &format!("Failed to create Java string array: {}", e));
+                    JObjectArray::default()
+                }
+            }
+        }
+        Ok(Err(e_str)) => {
+            throw_exception(&mut env, &e_str);
+            JObjectArray::default()
+        }
+        Err(panic_info) => {
+            let panic_msg = if let Some(s) = panic_info.downcast_ref::<&str>() {
+                *s
+            } else if let Some(s) = panic_info.downcast_ref::<String>() {
+                s.as_str()
+            } else {
+                "Unknown panic occurred in Rust JNI function"
+            };
+            throw_exception(&mut env, &format!("Rust panic: {}", panic_msg));
+            JObjectArray::default()
         }
     }
 } 

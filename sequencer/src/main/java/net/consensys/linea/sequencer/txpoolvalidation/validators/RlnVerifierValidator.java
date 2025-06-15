@@ -35,7 +35,10 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.google.common.annotations.VisibleForTesting;
 import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
@@ -43,6 +46,7 @@ import io.grpc.stub.StreamObserver;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.rln.jni.RlnBridge;
 import net.consensys.linea.rln.proofs.grpc.ProofMessage;
+import net.consensys.linea.rln.proofs.grpc.RlnProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
@@ -103,16 +107,6 @@ import org.slf4j.LoggerFactory;
 public class RlnVerifierValidator implements PluginTransactionPoolValidator, Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(RlnVerifierValidator.class);
   private static final String RLN_VALIDATION_FAILED_MESSAGE = "RLN validation failed";
-  private static final HttpClient httpClient =
-      HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(10)).build();
-  private static final Pattern KARMA_TIER_JSON_PATTERN =
-      Pattern.compile("\"tier\"\s*:\s*\"([^\"]*)\"");
-  private static final Pattern KARMA_EPOCH_TX_COUNT_JSON_PATTERN =
-      Pattern.compile("\"epochTxCount\"\s*:\s*(\\d+)");
-  private static final Pattern KARMA_DAILY_QUOTA_JSON_PATTERN =
-      Pattern.compile("\"dailyQuota\"\s*:\s*(\\d+)");
-  private static final Pattern KARMA_EPOCH_ID_JSON_PATTERN =
-      Pattern.compile("\"epochId\"\s*:\s*\"([^\"]*)\"");
 
   private final LineaRlnValidatorConfiguration rlnConfig;
   private final BlockchainService blockchainService;
@@ -120,17 +114,17 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   private final DenyListManager denyListManager;
   private ScheduledExecutorService proofCacheEvictionScheduler;
 
-  // CRITICAL FIX: Shared executor for proof waiting instead of creating one per transaction
-  private ScheduledExecutorService sharedProofWaitExecutor;
+  private final Map<String, CompletableFuture<CachedProof>> pendingProofs =
+      new ConcurrentHashMap<>();
 
-  // CRITICAL FIX: Concurrency limit for proof waiting to prevent resource exhaustion
   private final AtomicInteger activeProofWaits = new AtomicInteger(0);
   private static final int MAX_CONCURRENT_PROOF_WAITS = 100; // Configurable limit
 
   /**
-   * Represents a cached RLN proof with all required public inputs.
+   * Represents a cached RLN proof with combined format and extracted public inputs.
    *
-   * @param proofBytesHex Hex-encoded proof bytes from ZK proof generation
+   * @param combinedProofBytes Combined proof data (proof + proof values serialized together)
+   * @param senderBytes Sender address bytes
    * @param shareXHex X-coordinate of the secret share (public input)
    * @param shareYHex Y-coordinate of the secret share (public input)
    * @param epochHex Current epoch identifier (public input)
@@ -139,7 +133,8 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
    * @param cachedAt Timestamp when this proof was cached for TTL management
    */
   record CachedProof(
-      String proofBytesHex,
+      byte[] combinedProofBytes,
+      byte[] senderBytes,
       String shareXHex,
       String shareYHex,
       String epochHex,
@@ -147,35 +142,8 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       String nullifierHex,
       Instant cachedAt) {}
 
-  /**
-   * LRU Cache implementation with TTL support for RLN proofs.
-   *
-   * <p>This cache automatically evicts the least recently used entries when capacity is reached and
-   * supports time-based expiration for stale proofs.
-   */
-  private static class LRUProofCache extends LinkedHashMap<String, CachedProof> {
-    private final int maxSize;
-    private final long ttlSeconds;
-
-    public LRUProofCache(int maxSize, long ttlSeconds) {
-      super(maxSize + 1, 0.75f, true);
-      this.maxSize = maxSize;
-      this.ttlSeconds = ttlSeconds;
-    }
-
-    @Override
-    protected boolean removeEldestEntry(Map.Entry<String, CachedProof> eldest) {
-      return size() > maxSize
-          || (eldest.getValue().cachedAt().isBefore(Instant.now().minusSeconds(ttlSeconds)));
-    }
-
-    public void evictExpired() {
-      Instant cutoff = Instant.now().minusSeconds(ttlSeconds);
-      entrySet().removeIf(entry -> entry.getValue().cachedAt().isBefore(cutoff));
-    }
-  }
-
-  private final LRUProofCache rlnProofCache;
+  // High-performance Caffeine cache for RLN proofs
+  private final Cache<String, CachedProof> rlnProofCache;
 
   // gRPC client members for proof service
   private ManagedChannel proofServiceChannel;
@@ -241,9 +209,10 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     this.proofServiceChannel = providedProofChannel;
 
     // Initialize LRU cache with TTL support
-    this.rlnProofCache =
-        new LRUProofCache(
-            (int) rlnConfig.rlnProofCacheMaxSize(), rlnConfig.rlnProofCacheExpirySeconds());
+    this.rlnProofCache = Caffeine.newBuilder()
+        .expireAfterWrite(rlnConfig.rlnProofCacheExpirySeconds(), TimeUnit.SECONDS)
+        .maximumSize(rlnConfig.rlnProofCacheMaxSize())
+        .build();
 
     if (rlnConfig.rlnValidationEnabled()) {
       LOG.info("RLN Validator is ENABLED.");
@@ -351,26 +320,63 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
         new StreamObserver<>() {
           @Override
           public void onNext(ProofMessage proofMessage) {
-            LOG.debug("Received proof from gRPC stream for txHash: {}", proofMessage.getTxHash());
-            CachedProof cachedProof =
-                new CachedProof(
-                    proofMessage.getProofBytesHex(),
-                    proofMessage.getShareXHex(),
-                    proofMessage.getShareYHex(),
-                    proofMessage.getEpochHex(),
-                    proofMessage.getRootHex(),
-                    proofMessage.getNullifierHex(),
-                    Instant.now());
+            if (proofMessage.hasProof()) {
+              RlnProofMessage rlnProofMessage = proofMessage.getProof();
+              String txHashHex = Bytes.wrap(rlnProofMessage.getTxHash().toByteArray()).toHexString();
+              LOG.debug("Received proof from gRPC stream for txHash: {}", txHashHex);
+              
+              // Parse the combined proof and extract public inputs using JNI
+              String currentEpochId = getCurrentEpochIdentifier();
+              try {
+                String[] proofData = RlnBridge.parseAndVerifyRlnProof(
+                    rlnVerifyingKeyBytes,
+                    rlnProofMessage.getProof().toByteArray(),
+                    currentEpochId);
+                
+                if (proofData != null && proofData.length == 6 && "true".equals(proofData[5])) {
+                  CachedProof cachedProof =
+                      new CachedProof(
+                          rlnProofMessage.getProof().toByteArray(),
+                          rlnProofMessage.getSender().toByteArray(),
+                          proofData[0], // share_x
+                          proofData[1], // share_y
+                          proofData[2], // epoch
+                          proofData[3], // root
+                          proofData[4], // nullifier
+                          Instant.now());
 
-            synchronized (rlnProofCache) {
-              rlnProofCache.put(proofMessage.getTxHash(), cachedProof);
+                  rlnProofCache.put(txHashHex, cachedProof);
+                  LOG.trace(
+                      "Proof cached for txHash: {}, cache size: {}",
+                      txHashHex,
+                      rlnProofCache.estimatedSize());
+
+                  // Complete the future for any waiting threads
+                  CompletableFuture<CachedProof> proofFuture = pendingProofs.remove(txHashHex);
+                  if (proofFuture != null) {
+                    proofFuture.complete(cachedProof);
+                  }
+                } else {
+                  LOG.warn("Invalid proof received for txHash: {} (verification failed)", txHashHex);
+                  // Notify waiters about the failure
+                  CompletableFuture<CachedProof> proofFuture = pendingProofs.remove(txHashHex);
+                  if (proofFuture != null) {
+                    proofFuture.complete(null);
+                  }
+                }
+              } catch (Exception e) {
+                LOG.error("Failed to parse and verify proof for txHash: {}: {}", txHashHex, e.getMessage(), e);
+                // Notify waiters about the failure
+                CompletableFuture<CachedProof> proofFuture = pendingProofs.remove(txHashHex);
+                if (proofFuture != null) {
+                  proofFuture.complete(null);
+                }
+              }
+            } else if (proofMessage.hasError()) {
+              LOG.error("Received error from proof stream: {}", proofMessage.getError().getError());
             }
-            LOG.trace(
-                "Proof cached for txHash: {}, cache size: {}",
-                proofMessage.getTxHash(),
-                rlnProofCache.size());
 
-            // Reset retry count on successful message
+            // Reset retry count on successful message (even if proof was invalid)
             proofStreamRetryCount.set(0);
           }
 
@@ -445,135 +451,81 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   /**
    * Starts the scheduled task for proof cache eviction.
    *
-   * <p>Periodically removes expired proofs from the in-memory cache to prevent memory leaks and
-   * ensure fresh proof validation.
+   * <p>Note: With Caffeine cache, automatic TTL-based eviction is handled internally.
+   * This method is kept for compatibility but now only triggers manual cleanup.
    */
   private void startProofCacheEvictionScheduler() {
+    // Caffeine handles TTL automatically, but we can still do periodic cleanup for metrics
     proofCacheEvictionScheduler =
         Executors.newSingleThreadScheduledExecutor(r -> new Thread(r, "RlnProofCacheEviction"));
     proofCacheEvictionScheduler.scheduleAtFixedRate(
         this::evictExpiredProofs,
-        this.rlnConfig.rlnProofCacheExpirySeconds() / 2,
-        this.rlnConfig.rlnProofCacheExpirySeconds() / 2,
+        this.rlnConfig.rlnProofCacheExpirySeconds(),
+        this.rlnConfig.rlnProofCacheExpirySeconds(),
         TimeUnit.SECONDS);
   }
 
   /**
    * Initializes the shared executor for proof waiting operations.
-   *
-   * <p>CRITICAL FIX: This replaces the per-transaction executor creation pattern that was causing
-   * catastrophic thread leaks under load.
    */
   private void initializeSharedProofWaitExecutor() {
-    sharedProofWaitExecutor =
-        Executors.newScheduledThreadPool(
-            Math.min(10, MAX_CONCURRENT_PROOF_WAITS / 10), // Conservative thread pool size
-            r -> new Thread(r, "RlnSharedProofWait"));
-    LOG.info("Shared proof wait executor initialized with conservative thread pool size");
+    // This executor is no longer needed with the CompletableFuture-based approach
+    LOG.info("Shared proof wait executor is no longer used.");
   }
 
   /**
-   * Evicts expired proofs from the LRU cache.
+   * Triggers manual cache cleanup and logs cache statistics.
    *
-   * <p>Removes proofs that have exceeded their TTL to maintain cache freshness and prevent
-   * validation against stale proofs.
+   * <p>Note: Caffeine automatically evicts expired entries, so this is primarily
+   * for logging and manual cleanup triggers.
    */
   private void evictExpiredProofs() {
-    LOG.debug("Running RLN proof cache eviction. Current size: {}", rlnProofCache.size());
-    synchronized (rlnProofCache) {
-      rlnProofCache.evictExpired();
-    }
-    LOG.debug("RLN proof cache eviction finished. Size after eviction: {}", rlnProofCache.size());
+    LOG.debug("Running RLN proof cache cleanup. Current size: {}", rlnProofCache.estimatedSize());
+    rlnProofCache.cleanUp(); // Manual cleanup trigger
+    LOG.debug("RLN proof cache cleanup finished. Size after cleanup: {}", rlnProofCache.estimatedSize());
   }
 
   /**
-   * Waits for an RLN proof to appear in cache using CompletableFuture with timeout.
+   * Waits for an RLN proof to appear in cache using an event-driven CompletableFuture.
    *
-   * <p>CRITICAL FIX: This now uses a shared executor instead of creating one per transaction.
-   * Implements proper concurrency limits and task cancellation to prevent resource exhaustion.
+   * <p>This implementation avoids polling by creating a future that is completed by the gRPC
+   * stream thread. Implements proper concurrency limits to prevent resource exhaustion.
    *
    * @param txHashString The transaction hash to wait for
    * @return The cached proof if found within timeout, null otherwise
    */
   private CachedProof waitForProofInCache(String txHashString) {
     // First check if proof is already available
-    synchronized (rlnProofCache) {
-      CachedProof proof = rlnProofCache.get(txHashString);
-      if (proof != null) {
-        return proof;
-      }
+    CachedProof proof = rlnProofCache.getIfPresent(txHashString);
+    if (proof != null) {
+      return proof;
     }
 
-    // CRITICAL FIX: Apply backpressure - reject if too many concurrent waits
-    int currentWaits = activeProofWaits.get();
-    if (currentWaits >= MAX_CONCURRENT_PROOF_WAITS) {
+    // Apply backpressure - reject if too many concurrent waits
+    if (activeProofWaits.get() >= MAX_CONCURRENT_PROOF_WAITS) {
       LOG.warn(
           "Too many concurrent proof waits ({}), rejecting wait for tx {}",
-          currentWaits,
+          activeProofWaits.get(),
           txHashString);
       return null;
     }
 
-    // CRITICAL FIX: Use shared executor and track active waits
-    if (sharedProofWaitExecutor == null || sharedProofWaitExecutor.isShutdown()) {
-      LOG.warn("Shared proof wait executor not available for tx {}", txHashString);
-      return null;
-    }
+    CompletableFuture<CachedProof> proofFuture =
+        pendingProofs.computeIfAbsent(txHashString, k -> new CompletableFuture<>());
 
     activeProofWaits.incrementAndGet();
     try {
-      // Create a CompletableFuture that will complete when proof is found or timeout occurs
-      CompletableFuture<CachedProof> proofFuture = new CompletableFuture<>();
-
-      final long checkIntervalMs = 10;
-      final long timeoutMs = rlnConfig.rlnProofLocalWaitTimeoutMs();
-      final long maxChecks = timeoutMs / checkIntervalMs;
-      final AtomicInteger checkCount = new AtomicInteger(0);
-
-      // CRITICAL FIX: Use shared executor with proper task cancellation
-      ScheduledFuture<?> scheduledTask =
-          sharedProofWaitExecutor.scheduleAtFixedRate(
-              () -> {
-                try {
-                  synchronized (rlnProofCache) {
-                    CachedProof proof = rlnProofCache.get(txHashString);
-                    if (proof != null) {
-                      proofFuture.complete(proof);
-                      return; // Task will be cancelled via finally block
-                    }
-                  }
-
-                  // Check if we've exceeded max attempts
-                  if (checkCount.incrementAndGet() >= maxChecks) {
-                    proofFuture.complete(null); // Timeout
-                  }
-                } catch (Exception e) {
-                  proofFuture.completeExceptionally(e);
-                }
-              },
-              0,
-              checkIntervalMs,
-              TimeUnit.MILLISECONDS);
-
-      try {
-        // Wait for the future to complete with timeout as safety net
-        CachedProof result = proofFuture.get(timeoutMs + 100, TimeUnit.MILLISECONDS);
-        return result;
-      } catch (TimeoutException e) {
-        LOG.warn("Proof wait timed out for tx {}", txHashString);
-        proofFuture.complete(null);
-        return null;
-      } catch (Exception e) {
-        LOG.warn("Error waiting for proof for tx {}: {}", txHashString, e.getMessage());
-        return null;
-      } finally {
-        // CRITICAL FIX: Properly cancel the scheduled task to prevent resource leaks
-        if (scheduledTask != null && !scheduledTask.isDone()) {
-          scheduledTask.cancel(true);
-        }
-      }
+      // Wait for the future to be completed by the gRPC onNext handler
+      return proofFuture.get(rlnConfig.rlnProofLocalWaitTimeoutMs(), TimeUnit.MILLISECONDS);
+    } catch (TimeoutException e) {
+      LOG.warn("Proof wait timed out for tx {}", txHashString);
+      return null;
+    } catch (Exception e) {
+      LOG.warn("Error waiting for proof for tx {}: {}", txHashString, e.getMessage(), e);
+      return null;
     } finally {
-      // CRITICAL FIX: Always decrement the active wait counter
+      // Ensure the future is removed to prevent memory leaks if it timed out
+      pendingProofs.remove(txHashString);
       activeProofWaits.decrementAndGet();
     }
   }
@@ -622,9 +574,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
                   .atZone(ZoneOffset.UTC)
                   .format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH"));
       case "TEST" -> {
-        // Special test mode - return a fixed epoch for testing
-        // This should match the epoch in test data
-        LOG.debug("Using TEST epoch mode for testing");
+        LOG.warn("Using TEST epoch mode - this should only be used in testing!");
         yield "0x09a6ed7f807775ba43e63fbba747a7f0122aa3fac4a05b3392aea03eecdd1128";
       }
       default -> {
@@ -732,7 +682,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
     LOG.debug("RLN proof found in cache for txHash: {}", txHashString);
 
-    // CRITICAL FIX 1: Validate nullifier uniqueness BEFORE processing
+    // Validate nullifier uniqueness before any other processing to prevent replay attacks.
     String currentEpochId = getCurrentEpochIdentifier();
     if (nullifierTracker != null) {
       boolean isNullifierNew =
@@ -753,7 +703,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       return Optional.of("RLN validation failed: Nullifier tracking unavailable");
     }
 
-    // CRITICAL FIX 2: Validate epoch matches current epoch
+    // The proof's epoch must match the current epoch to be valid.
     if (!currentEpochId.equals(proof.epochHex())) {
       LOG.warn(
           "Epoch mismatch for tx {}. Proof epoch: {}, Current epoch: {}",
@@ -764,30 +714,13 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     }
     LOG.debug("Epoch validation passed for tx {}: {}", txHashString, currentEpochId);
 
-    // Assemble public inputs from the cached proof
-    String[] publicInputsHexArray = {
-      proof.shareXHex(), proof.shareYHex(), proof.epochHex(), proof.rootHex(), proof.nullifierHex()
-    };
-
-    // Verify the proof using RlnBridge (JNI call)
-    boolean rlnProofValid;
-    try {
-      rlnProofValid =
-          RlnBridge.verifyRlnProof(
-              rlnVerifyingKeyBytes,
-              Bytes.fromHexString(proof.proofBytesHex()).toArrayUnsafe(),
-              publicInputsHexArray);
-    } catch (Exception e) {
-      LOG.error(
-          "RLN JNI call to verifyRlnProof failed for tx {}: {}", txHashString, e.getMessage(), e);
-      return Optional.of(RLN_VALIDATION_FAILED_MESSAGE + ": JNI exception - " + e.getMessage());
-    }
-
-    if (!rlnProofValid) {
-      LOG.warn("RLN proof verification failed for tx: {}", txHashString);
-      return Optional.of(RLN_VALIDATION_FAILED_MESSAGE + ": Proof invalid.");
-    }
-    LOG.info("RLN proof verified successfully for tx: {}", txHashString);
+    // Since the proof was already verified and public inputs extracted during caching,
+    // we can skip the verification step here as the proof is already validated.
+    // However, for completeness and double-checking, we can still verify if needed.
+    
+    // The proof verification was already done during the onNext() processing when the proof was cached.
+    // At this point, we can trust that the cached proof is valid and the public inputs are correct.
+    LOG.info("Using cached and pre-verified RLN proof for tx: {}", txHashString);
 
     // 3. Karma / Quota Check (via gRPC Karma Service) - with fail-safe circuit breaker
     Optional<KarmaInfo> karmaInfoOpt = fetchKarmaInfoFromService(sender);
@@ -884,10 +817,6 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
     if (grpcReconnectionScheduler != null && !grpcReconnectionScheduler.isShutdown()) {
       grpcReconnectionScheduler.shutdownNow();
     }
-    // CRITICAL FIX: Shutdown shared proof wait executor
-    if (sharedProofWaitExecutor != null && !sharedProofWaitExecutor.isShutdown()) {
-      sharedProofWaitExecutor.shutdownNow();
-    }
 
     LOG.info("RlnVerifierValidator resources closed.");
   }
@@ -911,15 +840,11 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
 
   @VisibleForTesting
   Optional<CachedProof> getProofFromCacheForTest(String txHash) {
-    synchronized (rlnProofCache) {
-      return Optional.ofNullable(rlnProofCache.get(txHash));
-    }
+    return Optional.ofNullable(rlnProofCache.getIfPresent(txHash));
   }
 
   @VisibleForTesting
   void addProofToCacheForTest(String txHash, CachedProof proof) {
-    synchronized (rlnProofCache) {
-      rlnProofCache.put(txHash, proof);
-    }
+    rlnProofCache.put(txHash, proof);
   }
 }

@@ -5,20 +5,34 @@ package net.consensys.linea.rln.proofs.grpc;
 option java_package = "net.consensys.linea.rln.proofs.grpc";
 option java_multiple_files = true;
 
-// Message structure for an RLN proof and its associated public inputs
+// Message structure for an RLN proof from the prover service
+message RlnProofMessage {
+  bytes sender = 1;      // Sender address
+  bytes tx_hash = 2;     // Transaction hash for the proof
+  bytes proof = 3;       // The RLN proof itself (combined proof + proof values)
+}
+
+// Error message for RLN proof
+message RlnProofError {
+  string error = 1;
+}
+
+// Response message that can contain either a proof or an error
 message ProofMessage {
-  string tx_hash = 1;         // Transaction hash this proof is for
-  string proof_bytes_hex = 2; // The RLN proof itself, hex encoded
-  string share_x_hex = 3;     // Public input: x-coordinate of the secret share, hex encoded
-  string share_y_hex = 4;     // Public input: y-coordinate of the secret share, hex encoded
-  string epoch_hex = 5;       // Public input: epoch identifier, hex encoded
-  string root_hex = 6;        // Public input: Merkle tree root, hex encoded
-  string nullifier_hex = 7;   // Public input: nullifier, hex encoded
+  oneof resp {
+    RlnProofMessage proof = 1;
+    RlnProofError error = 2;
+  }
 }
 
 // Request message for subscribing to the proof stream
 message StreamProofsRequest {
   string client_id = 1; // Identifier for the client subscribing to the stream
+}
+
+// Filter for proof stream (optional address filtering)
+message RlnProofFilter {
+  optional string address = 1;
 }
 
 // Karma-related messages

@@ -102,4 +102,20 @@ public class RlnBridge {
       byte[] proofBytes,
       String[] publicInputsHex // [share_x_hex, share_y_hex, epoch_hex, root_hex, nullifier_hex]
       );
+
+  /**
+   * Parses and verifies an RLN proof from the combined format used by the RLN prover service.
+   *
+   * @param verifyingKeyBytes The serialized verifying key.
+   * @param combinedProofBytes The combined proof data (proof + proof values serialized together).
+   * @param currentEpochHex The current epoch identifier as hex string.
+   * @return String array containing [share_x, share_y, epoch, root, nullifier, verification_result]
+   *     if successful, null if verification fails.
+   * @throws RuntimeException if the native code encounters an error or panic (relayed from Rust),
+   *     or if there's an issue with JNI argument marshalling.
+   */
+  public static native String[] parseAndVerifyRlnProof(
+      byte[] verifyingKeyBytes,
+      byte[] combinedProofBytes,
+      String currentEpochHex);
 }

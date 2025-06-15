@@ -16,91 +16,92 @@ package net.consensys.linea.sequencer.txpoolvalidation.shared;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardOpenOption;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Executors;
-import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
+import com.github.benmanes.caffeine.cache.RemovalCause;
+import com.github.benmanes.caffeine.cache.RemovalListener;
+import com.github.benmanes.caffeine.cache.Scheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 /**
- * Thread-safe nullifier tracking service for RLN proof uniqueness validation.
- *
- * <p>This service prevents proof reuse attacks by maintaining a persistent record of used
- * nullifiers **scoped by epoch**. Key features:
- *
- * <ul>
- *   <li>Thread-safe concurrent nullifier tracking with proper epoch scoping
- *   <li>Persistent storage with atomic file operations
- *   <li>Automatic expiration of old nullifiers
- *   <li>Memory-efficient epoch-based cleanup
- *   <li>High-performance lookups for validation
- * </ul>
+ * High-performance nullifier tracking service using Caffeine cache.
  *
  * <p><strong>Security Critical:</strong> This component is essential for RLN security. Nullifier
- * reuse within the same epoch would completely compromise rate limiting guarantees.
+ * tracking prevents replay attacks and enforces transaction rate limiting by detecting when users
+ * reuse nullifiers within the same epoch.
  *
- * <p><strong>Epoch Scoping:</strong> Nullifiers are scoped by epoch, meaning the same nullifier can
- * be reused across different epochs but not within the same epoch. This is fundamental to RLN
- * semantics where users get fresh nullifiers each epoch.
+ * <p><strong>Performance Optimized:</strong> Uses Caffeine cache for high-throughput, low-latency
+ * operations. Eliminates file I/O bottlenecks present in naive implementations.
+ *
+ * <p><strong>Epoch Scoping:</strong> Nullifiers are tracked per epoch. The same nullifier can be
+ * reused across different epochs but not within the same epoch, enabling proper rate limiting.
+ *
+ * <p><strong>Automatic Cleanup:</strong> Expired nullifiers are automatically evicted based on
+ * configured TTL to prevent unbounded memory growth.
+ *
+ * <p><strong>Thread Safety:</strong> All operations are thread-safe and lock-free, suitable for
+ * high-concurrency transaction validation.
+ *
+ * @author Status Network Development Team
+ * @since 1.0
  */
 public class NullifierTracker implements Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(NullifierTracker.class);
 
   private final String serviceName;
-  private final Path nullifierStorageFile;
-  private final long nullifierExpiryHours;
-  private final ScheduledExecutorService cleanupScheduler;
+  private final Cache<String, NullifierData> nullifierCache;
 
-  // Thread-safe in-memory nullifier tracking: epochScopedKey -> nullifierData
-  private final ConcurrentHashMap<String, NullifierData> usedNullifiers = new ConcurrentHashMap<>();
-
-  // Metrics
+  // Metrics for monitoring and debugging
   private final AtomicLong totalNullifiersTracked = new AtomicLong(0);
   private final AtomicLong nullifierHits = new AtomicLong(0);
-  private final AtomicLong cleanupOperations = new AtomicLong(0);
+  private final AtomicLong expiredNullifiers = new AtomicLong(0);
 
   /** Represents a tracked nullifier with its metadata. */
   private record NullifierData(String nullifier, String epochId, Instant timestamp) {}
 
   /**
-   * Creates a new nullifier tracker with specified storage and expiry settings.
+   * Creates a new high-performance nullifier tracker using Caffeine cache.
    *
    * @param serviceName Service name for logging identification
-   * @param storageFilePath Path to persistent nullifier storage file
-   * @param nullifierExpiryHours Hours after which nullifiers expire and can be removed
+   * @param maxSize Maximum number of nullifiers to track simultaneously (cache size)
+   * @param nullifierExpiryHours Hours after which nullifiers expire and are evicted
+   */
+  public NullifierTracker(String serviceName, long maxSize, long nullifierExpiryHours) {
+    this.serviceName = serviceName;
+
+    // Configure Caffeine cache for optimal performance
+    this.nullifierCache = Caffeine.newBuilder()
+        .maximumSize(maxSize)
+        .expireAfterWrite(Duration.ofHours(nullifierExpiryHours))
+        .scheduler(Scheduler.systemScheduler()) // Use system scheduler for automatic cleanup
+        .removalListener(new NullifierRemovalListener())
+        .build();
+
+    LOG.info(
+        "{}: High-performance nullifier tracker initialized. MaxSize: {}, TTL: {} hours",
+        serviceName,
+        maxSize,
+        nullifierExpiryHours);
+  }
+
+  /**
+   * Legacy constructor for backward compatibility with file-based configuration.
+   * 
+   * <p><strong>Note:</strong> The storageFilePath is ignored in this implementation.
+   * Nullifiers are stored in memory only for maximum performance.
+   *
+   * @param serviceName Service name for logging identification
+   * @param storageFilePath Ignored - kept for backward compatibility
+   * @param nullifierExpiryHours Hours after which nullifiers expire and are evicted
    */
   public NullifierTracker(String serviceName, String storageFilePath, long nullifierExpiryHours) {
-    this.serviceName = serviceName;
-    this.nullifierStorageFile = Paths.get(storageFilePath);
-    this.nullifierExpiryHours = nullifierExpiryHours;
-    this.cleanupScheduler =
-        Executors.newSingleThreadScheduledExecutor(
-            r -> new Thread(r, serviceName + "-NullifierCleanup"));
-
-    LOG.info(
-        "{}: Initializing nullifier tracker with storage: {}, expiry: {} hours",
-        serviceName,
-        storageFilePath,
-        nullifierExpiryHours);
-
-    // Load existing nullifiers from storage
-    loadNullifiersFromStorage();
-
-    // Schedule regular cleanup of expired nullifiers
-    scheduleCleanupTasks();
-
-    LOG.info(
-        "{}: Nullifier tracker initialized with {} nullifiers", serviceName, usedNullifiers.size());
+    this(serviceName, 1_000_000L, nullifierExpiryHours); // Default to 1M capacity
+    LOG.info("{}: Using in-memory nullifier tracking (file path ignored for performance)", serviceName);
   }
 
   /**
@@ -130,38 +131,34 @@ public class NullifierTracker implements Closeable {
 
     String normalizedNullifier = nullifierHex.toLowerCase().trim();
     String normalizedEpochId = epochId.trim();
-
-    // CRITICAL FIX: Create epoch-scoped key for proper nullifier tracking
     String epochScopedKey = normalizedNullifier + ":" + normalizedEpochId;
 
     Instant now = Instant.now();
     NullifierData nullifierData = new NullifierData(normalizedNullifier, normalizedEpochId, now);
 
-    // Atomic check-and-set operation with epoch scoping
-    NullifierData previousUse = usedNullifiers.putIfAbsent(epochScopedKey, nullifierData);
+    // Atomic check-and-set using Caffeine's get() with loader pattern
+    NullifierData existingData = nullifierCache.get(epochScopedKey, key -> nullifierData);
 
-    if (previousUse != null) {
-      // Nullifier was already used in this epoch
+    if (existingData != nullifierData) {
+      // Nullifier was already present (existingData is the previous value)
       nullifierHits.incrementAndGet();
       LOG.warn(
           "{}: Nullifier reuse detected within epoch! Nullifier: {}, Epoch: {}, Previous use: {}",
           serviceName,
           normalizedNullifier,
           normalizedEpochId,
-          previousUse.timestamp());
+          existingData.timestamp());
       return false;
     }
 
-    // New nullifier for this epoch - persist to storage
+    // New nullifier for this epoch
     totalNullifiersTracked.incrementAndGet();
-    persistNullifierToStorage(normalizedNullifier, normalizedEpochId, now);
-
     LOG.debug(
-        "{}: New nullifier registered: {}, Epoch: {}, Total tracked: {}",
+        "{}: New nullifier registered: {}, Epoch: {}, Cache size: {}",
         serviceName,
         normalizedNullifier,
         normalizedEpochId,
-        usedNullifiers.size());
+        nullifierCache.estimatedSize());
 
     return true;
   }
@@ -181,181 +178,52 @@ public class NullifierTracker implements Closeable {
       return false;
     }
     String epochScopedKey = nullifierHex.toLowerCase().trim() + ":" + epochId.trim();
-    return usedNullifiers.containsKey(epochScopedKey);
+    return nullifierCache.getIfPresent(epochScopedKey) != null;
   }
 
-  /** Loads existing nullifiers from persistent storage on startup. */
-  private void loadNullifiersFromStorage() {
-    if (!Files.exists(nullifierStorageFile)) {
-      LOG.info("{}: No existing nullifier storage file found, starting fresh", serviceName);
-      return;
-    }
-
-    try {
-      var lines = Files.readAllLines(nullifierStorageFile, StandardCharsets.UTF_8);
-      int loaded = 0;
-      int expired = 0;
-      Instant cutoff = Instant.now().minus(Duration.ofHours(nullifierExpiryHours));
-
-      for (String line : lines) {
-        line = line.trim();
-        if (line.isEmpty() || line.startsWith("#")) continue;
-
-        String[] parts = line.split(",", 3);
-        if (parts.length >= 3) {
-          String nullifier = parts[0].trim();
-          String epochId = parts[2].trim(); // epoch is the third field
-          try {
-            Instant timestamp = Instant.parse(parts[1].trim());
-
-            if (timestamp.isAfter(cutoff)) {
-              // CRITICAL FIX: Use epoch-scoped key for loading
-              String epochScopedKey = nullifier + ":" + epochId;
-              NullifierData data = new NullifierData(nullifier, epochId, timestamp);
-              usedNullifiers.put(epochScopedKey, data);
-              loaded++;
-            } else {
-              expired++;
-            }
-          } catch (Exception e) {
-            LOG.warn("{}: Invalid timestamp in nullifier file: {}", serviceName, line);
-          }
-        } else {
-          LOG.warn("{}: Invalid nullifier file format: {}", serviceName, line);
-        }
-      }
-
-      LOG.info(
-          "{}: Loaded {} nullifiers from storage, expired {} old entries",
-          serviceName,
-          loaded,
-          expired);
-
-    } catch (IOException e) {
-      LOG.error("{}: Failed to load nullifiers from storage: {}", serviceName, e.getMessage(), e);
-    }
-  }
-
-  /** Persists a new nullifier to storage file atomically. */
-  private void persistNullifierToStorage(String nullifier, String epochId, Instant timestamp) {
-    try {
-      // Ensure parent directory exists
-      Files.createDirectories(nullifierStorageFile.getParent());
-
-      String entry = String.format("%s,%s,%s%n", nullifier, timestamp, epochId);
-      Files.writeString(
-          nullifierStorageFile,
-          entry,
-          StandardCharsets.UTF_8,
-          StandardOpenOption.CREATE,
-          StandardOpenOption.APPEND);
-
-    } catch (IOException e) {
-      LOG.error("{}: Failed to persist nullifier to storage: {}", serviceName, e.getMessage(), e);
-      // Don't throw - this is not fatal for immediate operation but log for investigation
-    }
-  }
-
-  /** Schedules regular cleanup of expired nullifiers. */
-  private void scheduleCleanupTasks() {
-    // Run cleanup every hour
-    cleanupScheduler.scheduleAtFixedRate(this::cleanupExpiredNullifiers, 1, 1, TimeUnit.HOURS);
-  }
-
-  /** Removes expired nullifiers from memory and rewrites storage file. */
-  private void cleanupExpiredNullifiers() {
-    LOG.debug("{}: Starting nullifier cleanup", serviceName);
-
-    Instant cutoff = Instant.now().minus(Duration.ofHours(nullifierExpiryHours));
-    int beforeSize = usedNullifiers.size();
-
-    // Remove expired entries from memory
-    usedNullifiers.entrySet().removeIf(entry -> entry.getValue().timestamp().isBefore(cutoff));
-
-    int afterSize = usedNullifiers.size();
-    int removed = beforeSize - afterSize;
-
-    if (removed > 0) {
-      cleanupOperations.incrementAndGet();
-      LOG.info(
-          "{}: Cleaned up {} expired nullifiers, {} remaining", serviceName, removed, afterSize);
-
-      // Rewrite storage file with only non-expired entries
-      rewriteStorageFile();
-    } else {
-      LOG.debug("{}: No expired nullifiers to clean up", serviceName);
-    }
-  }
-
-  /** Rewrites the entire storage file with only current nullifiers. */
-  private void rewriteStorageFile() {
-    try {
-      // Write to temporary file first
-      Path tempFile =
-          nullifierStorageFile.getParent().resolve(nullifierStorageFile.getFileName() + ".tmp");
-
-      StringBuilder content = new StringBuilder();
-      content.append("# Nullifier tracking file for ").append(serviceName).append("\n");
-      content.append("# Format: nullifier,timestamp,epoch\n");
-
-      // CRITICAL FIX: Use actual epoch data instead of hardcoded "epoch"
-      usedNullifiers.forEach(
-          (epochScopedKey, data) -> {
-            content.append(
-                String.format("%s,%s,%s%n", data.nullifier(), data.timestamp(), data.epochId()));
-          });
-
-      Files.writeString(tempFile, content.toString(), StandardCharsets.UTF_8);
-
-      // Atomic replace
-      Files.move(tempFile, nullifierStorageFile);
-
-      LOG.debug(
-          "{}: Rewrote nullifier storage file with {} entries", serviceName, usedNullifiers.size());
-
-    } catch (IOException e) {
-      LOG.error("{}: Failed to rewrite nullifier storage file: {}", serviceName, e.getMessage(), e);
-    }
-  }
-
-  /** Returns current nullifier tracking statistics. */
+  /**
+   * Gets current statistics for monitoring and debugging.
+   *
+   * @return Statistics including cache size, total tracked, hits, and expiration count
+   */
   public NullifierStats getStats() {
     return new NullifierStats(
-        usedNullifiers.size(),
+        (int) nullifierCache.estimatedSize(),
         totalNullifiersTracked.get(),
         nullifierHits.get(),
-        cleanupOperations.get());
+        expiredNullifiers.get());
   }
 
-  /** Statistics record for nullifier tracking. */
+  /**
+   * Statistics record for nullifier tracking metrics.
+   */
   public record NullifierStats(
-      int currentNullifiers, long totalTracked, long duplicateAttempts, long cleanupOperations) {}
+      int currentNullifiers, long totalTracked, long duplicateAttempts, long expiredCount) {}
+
+  /**
+   * Removal listener for tracking cache evictions and expiration events.
+   */
+  private class NullifierRemovalListener implements RemovalListener<String, NullifierData> {
+    @Override
+    public void onRemoval(String key, NullifierData value, RemovalCause cause) {
+      if (cause == RemovalCause.EXPIRED) {
+        expiredNullifiers.incrementAndGet();
+        if (LOG.isTraceEnabled()) {
+          LOG.trace("{}: Nullifier expired and evicted: {}", serviceName, key);
+        }
+      }
+    }
+  }
 
   @Override
   public void close() throws IOException {
-    LOG.info("{}: Shutting down nullifier tracker", serviceName);
-
-    if (cleanupScheduler != null && !cleanupScheduler.isShutdown()) {
-      cleanupScheduler.shutdown();
-      try {
-        if (!cleanupScheduler.awaitTermination(10, TimeUnit.SECONDS)) {
-          cleanupScheduler.shutdownNow();
-        }
-      } catch (InterruptedException e) {
-        cleanupScheduler.shutdownNow();
-        Thread.currentThread().interrupt();
-      }
+    if (nullifierCache != null) {
+      nullifierCache.invalidateAll();
+      nullifierCache.cleanUp();
     }
-
-    // Final cleanup and storage update
-    cleanupExpiredNullifiers();
-
-    NullifierStats stats = getStats();
     LOG.info(
-        "{}: Nullifier tracker shutdown complete. Final stats: {} current, {} total tracked, {} duplicates blocked",
+        "{}: Nullifier tracker closed. Final stats: {}",
         serviceName,
-        stats.currentNullifiers(),
-        stats.totalTracked(),
-        stats.duplicateAttempts());
+        getStats());
   }
 }
