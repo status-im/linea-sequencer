@@ -115,7 +115,5 @@ public class RlnBridge {
    *     or if there's an issue with JNI argument marshalling.
    */
   public static native String[] parseAndVerifyRlnProof(
-      byte[] verifyingKeyBytes,
-      byte[] combinedProofBytes,
-      String currentEpochHex);
+      byte[] verifyingKeyBytes, byte[] combinedProofBytes, String currentEpochHex);
 }

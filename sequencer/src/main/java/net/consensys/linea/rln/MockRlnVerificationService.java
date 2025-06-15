@@ -19,14 +19,14 @@ import org.slf4j.LoggerFactory;
 
 /**
  * Mock implementation of RlnVerificationService for testing purposes.
- * 
- * <p>This implementation provides configurable behavior for testing different
- * scenarios without requiring the native RLN library. It's particularly useful
- * for:
+ *
+ * <p>This implementation provides configurable behavior for testing different scenarios without
+ * requiring the native RLN library. It's particularly useful for:
+ *
  * <ul>
- *   <li>Unit testing in environments without native libraries</li>
- *   <li>Integration testing with predictable verification results</li>
- *   <li>Testing error handling and edge cases</li>
+ *   <li>Unit testing in environments without native libraries
+ *   <li>Integration testing with predictable verification results
+ *   <li>Testing error handling and edge cases
  * </ul>
  */
 public class MockRlnVerificationService implements RlnVerificationService {
@@ -35,52 +35,52 @@ public class MockRlnVerificationService implements RlnVerificationService {
   private boolean shouldVerifySuccessfully = true;
   private boolean shouldThrowException = false;
   private String exceptionMessage = "Mock verification error";
-  private RlnProofData mockProofData = new RlnProofData(
-      "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", // shareX
-      "0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321", // shareY  
-      "0x0000000000000000000000000000000000000000000000000000000000000001", // epoch
-      "0x2b1c4b4e1f1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e", // root
-      "0x3a2b3c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef0", // nullifier
-      true // isValid
-  );
+  private RlnProofData mockProofData =
+      new RlnProofData(
+          "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef", // shareX
+          "0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321", // shareY
+          "0x0000000000000000000000000000000000000000000000000000000000000001", // epoch
+          "0x2b1c4b4e1f1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e", // root
+          "0x3a2b3c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef0", // nullifier
+          true // isValid
+          );
 
   public MockRlnVerificationService() {
     LOG.info("Mock RLN verification service initialized");
   }
 
   @Override
-  public boolean verifyRlnProof(
-      byte[] verifyingKeyBytes,
-      byte[] proofBytes,
-      String[] publicInputs) throws RlnVerificationException {
-    
-    LOG.debug("Mock verification called with {} public inputs", 
+  public boolean verifyRlnProof(byte[] verifyingKeyBytes, byte[] proofBytes, String[] publicInputs)
+      throws RlnVerificationException {
+
+    LOG.debug(
+        "Mock verification called with {} public inputs",
         publicInputs != null ? publicInputs.length : "null");
-    
+
     if (shouldThrowException) {
       throw new RlnVerificationException(exceptionMessage);
     }
-    
+
     if (publicInputs == null || publicInputs.length != 5) {
-      throw new RlnVerificationException("Expected exactly 5 public inputs, got: " + 
-          (publicInputs == null ? "null" : publicInputs.length));
+      throw new RlnVerificationException(
+          "Expected exactly 5 public inputs, got: "
+              + (publicInputs == null ? "null" : publicInputs.length));
     }
-    
+
     return shouldVerifySuccessfully;
   }
 
   @Override
   public RlnProofData parseAndVerifyRlnProof(
-      byte[] verifyingKeyBytes,
-      byte[] combinedProofBytes,
-      String currentEpochHex) throws RlnVerificationException {
-    
+      byte[] verifyingKeyBytes, byte[] combinedProofBytes, String currentEpochHex)
+      throws RlnVerificationException {
+
     LOG.debug("Mock parseAndVerifyRlnProof called with epoch: {}", currentEpochHex);
-    
+
     if (shouldThrowException) {
       throw new RlnVerificationException(exceptionMessage);
     }
-    
+
     // Create a copy of the mock data with the correct epoch
     return new RlnProofData(
         mockProofData.shareX(),
@@ -88,8 +88,7 @@ public class MockRlnVerificationService implements RlnVerificationService {
         currentEpochHex, // Use the provided epoch
         mockProofData.root(),
         mockProofData.nullifier(),
-        shouldVerifySuccessfully
-    );
+        shouldVerifySuccessfully);
   }
 
   @Override
@@ -136,13 +135,11 @@ public class MockRlnVerificationService implements RlnVerificationService {
     LOG.debug("Mock proof data updated");
   }
 
-  /**
-   * Resets the mock to default behavior (verification succeeds, no exceptions).
-   */
+  /** Resets the mock to default behavior (verification succeeds, no exceptions). */
   public void reset() {
     this.shouldVerifySuccessfully = true;
     this.shouldThrowException = false;
     this.exceptionMessage = "Mock verification error";
     LOG.debug("Mock verification service reset to defaults");
   }
-} 
+}

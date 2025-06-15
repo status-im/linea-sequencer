@@ -75,12 +75,13 @@ public class NullifierTracker implements Closeable {
     this.serviceName = serviceName;
 
     // Configure Caffeine cache for optimal performance
-    this.nullifierCache = Caffeine.newBuilder()
-        .maximumSize(maxSize)
-        .expireAfterWrite(Duration.ofHours(nullifierExpiryHours))
-        .scheduler(Scheduler.systemScheduler()) // Use system scheduler for automatic cleanup
-        .removalListener(new NullifierRemovalListener())
-        .build();
+    this.nullifierCache =
+        Caffeine.newBuilder()
+            .maximumSize(maxSize)
+            .expireAfterWrite(Duration.ofHours(nullifierExpiryHours))
+            .scheduler(Scheduler.systemScheduler()) // Use system scheduler for automatic cleanup
+            .removalListener(new NullifierRemovalListener())
+            .build();
 
     LOG.info(
         "{}: High-performance nullifier tracker initialized. MaxSize: {}, TTL: {} hours",
@@ -91,9 +92,9 @@ public class NullifierTracker implements Closeable {
 
   /**
    * Legacy constructor for backward compatibility with file-based configuration.
-   * 
-   * <p><strong>Note:</strong> The storageFilePath is ignored in this implementation.
-   * Nullifiers are stored in memory only for maximum performance.
+   *
+   * <p><strong>Note:</strong> The storageFilePath is ignored in this implementation. Nullifiers are
+   * stored in memory only for maximum performance.
    *
    * @param serviceName Service name for logging identification
    * @param storageFilePath Ignored - kept for backward compatibility
@@ -101,7 +102,8 @@ public class NullifierTracker implements Closeable {
    */
   public NullifierTracker(String serviceName, String storageFilePath, long nullifierExpiryHours) {
     this(serviceName, 1_000_000L, nullifierExpiryHours); // Default to 1M capacity
-    LOG.info("{}: Using in-memory nullifier tracking (file path ignored for performance)", serviceName);
+    LOG.info(
+        "{}: Using in-memory nullifier tracking (file path ignored for performance)", serviceName);
   }
 
   /**
@@ -194,15 +196,11 @@ public class NullifierTracker implements Closeable {
         expiredNullifiers.get());
   }
 
-  /**
-   * Statistics record for nullifier tracking metrics.
-   */
+  /** Statistics record for nullifier tracking metrics. */
   public record NullifierStats(
       int currentNullifiers, long totalTracked, long duplicateAttempts, long expiredCount) {}
 
-  /**
-   * Removal listener for tracking cache evictions and expiration events.
-   */
+  /** Removal listener for tracking cache evictions and expiration events. */
   private class NullifierRemovalListener implements RemovalListener<String, NullifierData> {
     @Override
     public void onRemoval(String key, NullifierData value, RemovalCause cause) {
@@ -221,9 +219,6 @@ public class NullifierTracker implements Closeable {
       nullifierCache.invalidateAll();
       nullifierCache.cleanUp();
     }
-    LOG.info(
-        "{}: Nullifier tracker closed. Final stats: {}",
-        serviceName,
-        getStats());
+    LOG.info("{}: Nullifier tracker closed. Final stats: {}", serviceName, getStats());
   }
 }

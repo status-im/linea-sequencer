@@ -20,21 +20,20 @@ import org.slf4j.LoggerFactory;
 
 /**
  * JNI-based implementation of RlnVerificationService.
- * 
- * <p>This implementation wraps the existing RlnBridge JNI calls and provides
- * better error handling and abstraction. It isolates the JNI complexity
- * from the rest of the application.
+ *
+ * <p>This implementation wraps the existing RlnBridge JNI calls and provides better error handling
+ * and abstraction. It isolates the JNI complexity from the rest of the application.
  */
 public class JniRlnVerificationService implements RlnVerificationService {
   private static final Logger LOG = LoggerFactory.getLogger(JniRlnVerificationService.class);
-  
+
   private final boolean isAvailable;
 
   /**
    * Creates a new JNI-based RLN verification service.
-   * 
-   * <p>The constructor tests if the native library is available and logs
-   * the result for debugging purposes.
+   *
+   * <p>The constructor tests if the native library is available and logs the result for debugging
+   * purposes.
    */
   public JniRlnVerificationService() {
     boolean available = false;
@@ -44,16 +43,17 @@ public class JniRlnVerificationService implements RlnVerificationService {
       available = testNativeLibraryAvailability();
       LOG.info("JNI RLN verification service initialized successfully");
     } catch (UnsatisfiedLinkError e) {
-      LOG.error("JNI RLN verification service unavailable - native library not loaded: {}", e.getMessage());
+      LOG.error(
+          "JNI RLN verification service unavailable - native library not loaded: {}",
+          e.getMessage());
     } catch (Exception e) {
-      LOG.error("JNI RLN verification service unavailable - initialization error: {}", e.getMessage(), e);
+      LOG.error(
+          "JNI RLN verification service unavailable - initialization error: {}", e.getMessage(), e);
     }
     this.isAvailable = available;
   }
 
-  /**
-   * Tests if the native library is available by attempting a simple JNI call.
-   */
+  /** Tests if the native library is available by attempting a simple JNI call. */
   private boolean testNativeLibraryAvailability() {
     try {
       // Try to load the RlnBridge class which triggers native library loading
@@ -65,18 +65,17 @@ public class JniRlnVerificationService implements RlnVerificationService {
   }
 
   @Override
-  public boolean verifyRlnProof(
-      byte[] verifyingKeyBytes,
-      byte[] proofBytes,
-      String[] publicInputs) throws RlnVerificationException {
-    
+  public boolean verifyRlnProof(byte[] verifyingKeyBytes, byte[] proofBytes, String[] publicInputs)
+      throws RlnVerificationException {
+
     if (!isAvailable) {
       throw new RlnVerificationException("JNI RLN verification service is not available");
     }
 
     if (publicInputs == null || publicInputs.length != 5) {
-      throw new RlnVerificationException("Expected exactly 5 public inputs, got: " + 
-          (publicInputs == null ? "null" : publicInputs.length));
+      throw new RlnVerificationException(
+          "Expected exactly 5 public inputs, got: "
+              + (publicInputs == null ? "null" : publicInputs.length));
     }
 
     try {
@@ -88,36 +87,34 @@ public class JniRlnVerificationService implements RlnVerificationService {
 
   @Override
   public RlnProofData parseAndVerifyRlnProof(
-      byte[] verifyingKeyBytes,
-      byte[] combinedProofBytes,
-      String currentEpochHex) throws RlnVerificationException {
-    
+      byte[] verifyingKeyBytes, byte[] combinedProofBytes, String currentEpochHex)
+      throws RlnVerificationException {
+
     if (!isAvailable) {
       throw new RlnVerificationException("JNI RLN verification service is not available");
     }
 
     try {
-      String[] result = RlnBridge.parseAndVerifyRlnProof(
-          verifyingKeyBytes, combinedProofBytes, currentEpochHex);
-      
+      String[] result =
+          RlnBridge.parseAndVerifyRlnProof(verifyingKeyBytes, combinedProofBytes, currentEpochHex);
+
       if (result == null) {
         throw new RlnVerificationException("Native proof parsing returned null");
       }
-      
+
       if (result.length != 6) {
         throw new RlnVerificationException("Expected 6 result values, got: " + result.length);
       }
 
       boolean isValid = "true".equals(result[5]);
-      
+
       return new RlnProofData(
           result[0], // shareX
           result[1], // shareY
           result[2], // epoch
           result[3], // root
           result[4], // nullifier
-          isValid
-      );
+          isValid);
     } catch (RuntimeException e) {
       throw new RlnVerificationException("Native RLN proof parsing and verification failed", e);
     }
@@ -130,8 +127,8 @@ public class JniRlnVerificationService implements RlnVerificationService {
 
   @Override
   public String getImplementationInfo() {
-    return isAvailable 
+    return isAvailable
         ? "JNI-based RLN verification service (native Rust implementation)"
         : "JNI-based RLN verification service (UNAVAILABLE - native library not loaded)";
   }
-} 
+}

@@ -13,38 +13,30 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package net.consensys.linea.rln;
+
 /**
  * Service interface for RLN (Rate Limiting Nullifier) proof verification.
- * 
+ *
  * <p>This abstraction allows for different implementations:
+ *
  * <ul>
- *   <li>Production: JNI-based implementation using Rust cryptography</li>
- *   <li>Testing: Mock implementation for unit tests</li>
- *   <li>Fallback: Alternative verification backends</li>
+ *   <li>Production: JNI-based implementation using Rust cryptography
+ *   <li>Testing: Mock implementation for unit tests
+ *   <li>Fallback: Alternative verification backends
  * </ul>
  */
 public interface RlnVerificationService {
 
-  /**
-   * Represents the result of parsing and verifying an RLN proof.
-   */
+  /** Represents the result of parsing and verifying an RLN proof. */
   record RlnProofData(
-      String shareX,
-      String shareY, 
-      String epoch,
-      String root,
-      String nullifier,
-      boolean isValid
-  ) {}
+      String shareX, String shareY, String epoch, String root, String nullifier, boolean isValid) {}
 
-  /**
-   * Exception thrown when RLN verification operations fail.
-   */
+  /** Exception thrown when RLN verification operations fail. */
   class RlnVerificationException extends Exception {
     public RlnVerificationException(String message) {
       super(message);
     }
-    
+
     public RlnVerificationException(String message, Throwable cause) {
       super(message, cause);
     }
@@ -55,14 +47,13 @@ public interface RlnVerificationService {
    *
    * @param verifyingKeyBytes The serialized verifying key
    * @param proofBytes The serialized proof
-   * @param publicInputs Array of public input hex strings: [share_x, share_y, epoch, root, nullifier]
+   * @param publicInputs Array of public input hex strings: [share_x, share_y, epoch, root,
+   *     nullifier]
    * @return true if the proof is valid, false otherwise
    * @throws RlnVerificationException if verification cannot be performed
    */
-  boolean verifyRlnProof(
-      byte[] verifyingKeyBytes,
-      byte[] proofBytes,
-      String[] publicInputs) throws RlnVerificationException;
+  boolean verifyRlnProof(byte[] verifyingKeyBytes, byte[] proofBytes, String[] publicInputs)
+      throws RlnVerificationException;
 
   /**
    * Parses and verifies an RLN proof from combined format.
@@ -74,9 +65,8 @@ public interface RlnVerificationService {
    * @throws RlnVerificationException if parsing or verification fails
    */
   RlnProofData parseAndVerifyRlnProof(
-      byte[] verifyingKeyBytes,
-      byte[] combinedProofBytes,
-      String currentEpochHex) throws RlnVerificationException;
+      byte[] verifyingKeyBytes, byte[] combinedProofBytes, String currentEpochHex)
+      throws RlnVerificationException;
 
   /**
    * Checks if the verification service is available and ready to use.
@@ -91,4 +81,4 @@ public interface RlnVerificationService {
    * @return description string
    */
   String getImplementationInfo();
-} 
+}

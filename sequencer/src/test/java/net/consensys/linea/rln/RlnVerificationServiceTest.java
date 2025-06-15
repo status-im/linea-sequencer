@@ -22,13 +22,14 @@ import org.junit.jupiter.api.Test;
 
 /**
  * Test class demonstrating how the new RLN verification architecture makes testing easier.
- * 
+ *
  * <p>This example shows:
+ *
  * <ul>
- *   <li>Easy mocking without JNI dependencies</li>
- *   <li>Configurable test scenarios</li>
- *   <li>Clean separation of concerns</li>
- *   <li>Better error handling</li>
+ *   <li>Easy mocking without JNI dependencies
+ *   <li>Configurable test scenarios
+ *   <li>Clean separation of concerns
+ *   <li>Better error handling
  * </ul>
  */
 class RlnVerificationServiceTest {
@@ -41,15 +42,16 @@ class RlnVerificationServiceTest {
   @BeforeEach
   void setUp() {
     mockService = new MockRlnVerificationService();
-    dummyVerifyingKey = new byte[]{1, 2, 3, 4};
-    dummyProofBytes = new byte[]{5, 6, 7, 8};
-    validPublicInputs = new String[]{
-        "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
-        "0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
-        "0x0000000000000000000000000000000000000000000000000000000000000001",
-        "0x2b1c4b4e1f1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
-        "0x3a2b3c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef0"
-    };
+    dummyVerifyingKey = new byte[] {1, 2, 3, 4};
+    dummyProofBytes = new byte[] {5, 6, 7, 8};
+    validPublicInputs =
+        new String[] {
+          "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+          "0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
+          "0x0000000000000000000000000000000000000000000000000000000000000001",
+          "0x2b1c4b4e1f1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e1e",
+          "0x3a2b3c4d5e6f7890123456789abcdef0123456789abcdef0123456789abcdef0"
+        };
   }
 
   @Test
@@ -58,7 +60,8 @@ class RlnVerificationServiceTest {
     mockService.setVerificationResult(true);
 
     // When: Verify a proof
-    boolean result = mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs);
+    boolean result =
+        mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs);
 
     // Then: Verification succeeds
     assertThat(result).isTrue();
@@ -70,7 +73,8 @@ class RlnVerificationServiceTest {
     mockService.setVerificationResult(false);
 
     // When: Verify a proof
-    boolean result = mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs);
+    boolean result =
+        mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs);
 
     // Then: Verification fails
     assertThat(result).isFalse();
@@ -82,7 +86,8 @@ class RlnVerificationServiceTest {
     mockService.setThrowException(true, "Test verification error");
 
     // When/Then: Verification throws exception
-    assertThatThrownBy(() -> mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs))
+    assertThatThrownBy(
+            () -> mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs))
         .isInstanceOf(RlnVerificationService.RlnVerificationException.class)
         .hasMessage("Test verification error");
   }
@@ -91,26 +96,30 @@ class RlnVerificationServiceTest {
   void testParseAndVerifyProof() throws Exception {
     // Given: Mock configured with custom proof data
     String epoch = "0x123456789abcdef0";
-    RlnVerificationService.RlnProofData customData = new RlnVerificationService.RlnProofData(
-        "0x1111111111111111111111111111111111111111111111111111111111111111",
-        "0x2222222222222222222222222222222222222222222222222222222222222222",
-        epoch,
-        "0x3333333333333333333333333333333333333333333333333333333333333333",
-        "0x4444444444444444444444444444444444444444444444444444444444444444",
-        true
-    );
+    RlnVerificationService.RlnProofData customData =
+        new RlnVerificationService.RlnProofData(
+            "0x1111111111111111111111111111111111111111111111111111111111111111",
+            "0x2222222222222222222222222222222222222222222222222222222222222222",
+            epoch,
+            "0x3333333333333333333333333333333333333333333333333333333333333333",
+            "0x4444444444444444444444444444444444444444444444444444444444444444",
+            true);
     mockService.setMockProofData(customData);
 
     // When: Parse and verify proof
-    RlnVerificationService.RlnProofData result = mockService.parseAndVerifyRlnProof(
-        dummyVerifyingKey, dummyProofBytes, epoch);
+    RlnVerificationService.RlnProofData result =
+        mockService.parseAndVerifyRlnProof(dummyVerifyingKey, dummyProofBytes, epoch);
 
     // Then: Returns expected data with correct epoch
-    assertThat(result.shareX()).isEqualTo("0x1111111111111111111111111111111111111111111111111111111111111111");
-    assertThat(result.shareY()).isEqualTo("0x2222222222222222222222222222222222222222222222222222222222222222");
+    assertThat(result.shareX())
+        .isEqualTo("0x1111111111111111111111111111111111111111111111111111111111111111");
+    assertThat(result.shareY())
+        .isEqualTo("0x2222222222222222222222222222222222222222222222222222222222222222");
     assertThat(result.epoch()).isEqualTo(epoch); // Should use provided epoch
-    assertThat(result.root()).isEqualTo("0x3333333333333333333333333333333333333333333333333333333333333333");
-    assertThat(result.nullifier()).isEqualTo("0x4444444444444444444444444444444444444444444444444444444444444444");
+    assertThat(result.root())
+        .isEqualTo("0x3333333333333333333333333333333333333333333333333333333333333333");
+    assertThat(result.nullifier())
+        .isEqualTo("0x4444444444444444444444444444444444444444444444444444444444444444");
     assertThat(result.isValid()).isTrue();
   }
 
@@ -124,10 +133,11 @@ class RlnVerificationServiceTest {
   @Test
   void testInvalidPublicInputs() {
     // Given: Invalid public inputs (wrong number)
-    String[] invalidInputs = new String[]{"0x123", "0x456"}; // Only 2 instead of 5
+    String[] invalidInputs = new String[] {"0x123", "0x456"}; // Only 2 instead of 5
 
     // When/Then: Should throw exception
-    assertThatThrownBy(() -> mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, invalidInputs))
+    assertThatThrownBy(
+            () -> mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, invalidInputs))
         .isInstanceOf(RlnVerificationService.RlnVerificationException.class)
         .hasMessage("Expected exactly 5 public inputs, got: 2");
   }
@@ -137,7 +147,8 @@ class RlnVerificationServiceTest {
     // When: Create service with auto selection
     RlnVerificationService service = RlnVerificationServiceFactory.createAutoService();
 
-    // Then: Should return available service (likely mock since native may not be available in tests)
+    // Then: Should return available service (likely mock since native may not be available in
+    // tests)
     assertThat(service).isNotNull();
     assertThat(service.isAvailable()).isTrue();
   }
@@ -145,8 +156,8 @@ class RlnVerificationServiceTest {
   @Test
   void testFactoryMockCreation() {
     // When: Explicitly create mock service
-    RlnVerificationService service = RlnVerificationServiceFactory.create(
-        RlnVerificationServiceFactory.ServiceType.MOCK);
+    RlnVerificationService service =
+        RlnVerificationServiceFactory.create(RlnVerificationServiceFactory.ServiceType.MOCK);
 
     // Then: Should return mock service
     assertThat(service).isInstanceOf(MockRlnVerificationService.class);
@@ -164,7 +175,8 @@ class RlnVerificationServiceTest {
     mockService.reset();
 
     // Then: Should return to default behavior (successful verification, no exceptions)
-    boolean result = mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs);
+    boolean result =
+        mockService.verifyRlnProof(dummyVerifyingKey, dummyProofBytes, validPublicInputs);
     assertThat(result).isTrue();
   }
-} 
+}

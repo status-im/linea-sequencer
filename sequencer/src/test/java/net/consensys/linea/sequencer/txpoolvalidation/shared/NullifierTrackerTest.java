@@ -191,28 +191,29 @@ class NullifierTrackerTest {
   void testCacheExpiration_behavesCorrectly() throws InterruptedException, IOException {
     // Note: Caffeine's expiration is not immediate for performance reasons.
     // This test verifies the cache can handle expiration configuration without crashing
-    
+
     // Create tracker with reasonable size and short expiry (1 hour for testing)
-    NullifierTracker shortExpiryTracker = new NullifierTracker("TestService", 100L, 1L); // 1 hour expiry
+    NullifierTracker shortExpiryTracker =
+        new NullifierTracker("TestService", 100L, 1L); // 1 hour expiry
 
     try {
       // Add a nullifier
       assertTrue(shortExpiryTracker.checkAndMarkNullifier("0x1234", "epoch1"));
-      
+
       // Should be present immediately
       assertTrue(shortExpiryTracker.isNullifierUsed("0x1234", "epoch1"));
-      
+
       // Add another nullifier to verify system continues to work
       assertTrue(shortExpiryTracker.checkAndMarkNullifier("0x5678", "epoch2"));
-      
+
       // Verify both are trackable
       assertTrue(shortExpiryTracker.isNullifierUsed("0x5678", "epoch2"));
-      
+
       // Stats should work
       NullifierTracker.NullifierStats stats = shortExpiryTracker.getStats();
       assertTrue(stats.currentNullifiers() >= 0); // May have expired, but shouldn't be negative
       assertEquals(2, stats.totalTracked()); // Total tracked doesn't decrease
-      
+
     } finally {
       shortExpiryTracker.close();
     }
@@ -221,13 +222,13 @@ class NullifierTrackerTest {
   @Test
   void testCaseSensitivity_normalizesNullifiers() {
     String epoch = "epoch1";
-    
+
     // Use uppercase nullifier
     assertTrue(tracker.checkAndMarkNullifier("0X1234ABCD", epoch));
-    
+
     // Try lowercase version - should be rejected (same nullifier)
     assertFalse(tracker.checkAndMarkNullifier("0x1234abcd", epoch));
-    
+
     // Check with both cases
     assertTrue(tracker.isNullifierUsed("0X1234ABCD", epoch));
     assertTrue(tracker.isNullifierUsed("0x1234abcd", epoch));

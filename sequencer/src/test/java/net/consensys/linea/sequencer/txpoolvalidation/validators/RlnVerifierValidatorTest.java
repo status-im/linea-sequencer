@@ -16,7 +16,6 @@ package net.consensys.linea.sequencer.txpoolvalidation.validators;
 
 import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
-import org.mockito.ArgumentMatchers;
 
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,7 +36,6 @@ import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.rln.jni.RlnBridge;
 import net.consensys.linea.rln.proofs.grpc.ProofMessage;
-import net.consensys.linea.rln.proofs.grpc.RlnProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
 import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
@@ -469,35 +467,37 @@ class RlnVerifierValidatorTest {
     // This simulates what would happen if the gRPC stream received a valid proof
     String testTxHash = "0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff";
     byte[] testTxHashBytes = Bytes.fromHexString(testTxHash).toArrayUnsafe();
-    byte[] testSenderBytes = Bytes.fromHexString("0x1234567890123456789012345678901234567890").toArrayUnsafe();
-    
+    byte[] testSenderBytes =
+        Bytes.fromHexString("0x1234567890123456789012345678901234567890").toArrayUnsafe();
+
     // Create combined proof bytes (this would normally come from the prover service)
-    byte[] combinedProofBytes = Bytes.fromHexString("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef").toArrayUnsafe();
-    
+    byte[] combinedProofBytes =
+        Bytes.fromHexString("0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef")
+            .toArrayUnsafe();
+
     // Sanity check: cache should be empty initially for this tx hash
     assertFalse(
         validator.getProofFromCacheForTest(testTxHash).isPresent(),
         "Proof cache should be empty for " + testTxHash + " initially.");
 
     // Directly add proof to cache (simulating successful gRPC processing)
-    RlnVerifierValidator.CachedProof testProof = new RlnVerifierValidator.CachedProof(
-        combinedProofBytes,
-        testSenderBytes,
-        "0x123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
-        "0x987654321fedcba0987654321fedcba0987654321fedcba0987654321fedcba0",
-        "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
-        "0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
-        "0x111111111111111111111111111111111111111111111111111111111111111",
-        Instant.now());
-    
+    RlnVerifierValidator.CachedProof testProof =
+        new RlnVerifierValidator.CachedProof(
+            combinedProofBytes,
+            testSenderBytes,
+            "0x123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef0",
+            "0x987654321fedcba0987654321fedcba0987654321fedcba0987654321fedcba0",
+            "0xabcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890",
+            "0xfedcba0987654321fedcba0987654321fedcba0987654321fedcba0987654321",
+            "0x111111111111111111111111111111111111111111111111111111111111111",
+            Instant.now());
+
     validator.addProofToCacheForTest(testTxHash, testProof);
 
     // Verify proof is now in cache
     Optional<RlnVerifierValidator.CachedProof> cachedProofOpt =
         validator.getProofFromCacheForTest(testTxHash);
-    assertTrue(
-        cachedProofOpt.isPresent(),
-        "Proof should be in cache after adding it.");
+    assertTrue(cachedProofOpt.isPresent(), "Proof should be in cache after adding it.");
 
     RlnVerifierValidator.CachedProof cachedProof = cachedProofOpt.get();
     assertNotNull(cachedProof.cachedAt());
@@ -526,7 +526,8 @@ class RlnVerifierValidatorTest {
     // proof.
     String testTxHash = "0x11223344556677889900aabbccddeeff11223344556677889900aabbccddeeff";
     byte[] testTxHashBytes = Bytes.fromHexString(testTxHash).toArrayUnsafe();
-    byte[] testSenderBytes = Bytes.fromHexString("0x1234567890123456789012345678901234567890").toArrayUnsafe();
+    byte[] testSenderBytes =
+        Bytes.fromHexString("0x1234567890123456789012345678901234567890").toArrayUnsafe();
 
     String proofEpoch = publicInputsJson.getString("epoch");
     String proofNullifier = publicInputsJson.getString("nullifier");
@@ -824,9 +825,12 @@ class RlnVerifierValidatorTest {
     when(rlnConfig.rlnProofCacheExpirySeconds()).thenReturn(1L); // 1 second expiry
 
     String txHash = "0x8888567890abcdef8888567890abcdef8888567890abcdef8888567890abcdef";
-    byte[] oldProofBytes = Bytes.fromHexString("0xcafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe").toArrayUnsafe();
-    byte[] testSenderBytes = Bytes.fromHexString("0x8888567890123456789012345678901234567890").toArrayUnsafe();
-    
+    byte[] oldProofBytes =
+        Bytes.fromHexString("0xcafebabecafebabecafebabecafebabecafebabecafebabecafebabecafebabe")
+            .toArrayUnsafe();
+    byte[] testSenderBytes =
+        Bytes.fromHexString("0x8888567890123456789012345678901234567890").toArrayUnsafe();
+
     RlnVerifierValidator.CachedProof oldProof =
         new RlnVerifierValidator.CachedProof(
             oldProofBytes,
@@ -918,9 +922,10 @@ class RlnVerifierValidatorTest {
     // Use a valid proof from our test data to pass proof verification
     if (jniTestFirstValidProofEntry != null) {
       JSONObject publicInputs = jniTestFirstValidProofEntry.getJSONObject("public_inputs");
-      byte[] combinedProofBytes = Bytes.fromHexString(jniTestFirstValidProofEntry.getString("proof")).toArrayUnsafe();
+      byte[] combinedProofBytes =
+          Bytes.fromHexString(jniTestFirstValidProofEntry.getString("proof")).toArrayUnsafe();
       byte[] testSenderBytes = sender.toArrayUnsafe();
-      
+
       testValidator.addProofToCacheForTest(
           txHash,
           new RlnVerifierValidator.CachedProof(
