@@ -41,14 +41,14 @@ import io.grpc.stub.StreamObserver;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.rln.RlnVerificationService;
 import net.consensys.linea.rln.RlnVerificationServiceFactory;
-import net.consensys.linea.rln.proofs.grpc.ProofMessage;
-import net.consensys.linea.rln.proofs.grpc.RlnProofMessage;
-import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
-import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient.KarmaInfo;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.NullifierTracker;
+import net.vac.prover.RlnProof;
+import net.vac.prover.RlnProofFilter;
+import net.vac.prover.RlnProofReply;
+import net.vac.prover.RlnProverGrpc;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Transaction;
@@ -143,7 +143,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
 
   // gRPC client members for proof service
   private ManagedChannel proofServiceChannel;
-  private RlnProofServiceGrpc.RlnProofServiceStub asyncProofStub;
+  private RlnProverGrpc.RlnProverStub asyncProofStub;
 
   // Shared karma service client (injected dependency)
   private final KarmaServiceClient karmaServiceClient;
@@ -300,7 +300,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       this.proofServiceChannel = channelBuilder.build();
     }
 
-    this.asyncProofStub = RlnProofServiceGrpc.newStub(this.proofServiceChannel);
+    this.asyncProofStub = RlnProverGrpc.newStub(this.proofServiceChannel);
 
     if (wasChannelProvided) {
       LOG.info("RLN Proof Service client initialized with injected ManagedChannel.");
@@ -325,16 +325,16 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       return;
     }
     LOG.info("Attempting to subscribe to RLN proof stream...");
-    StreamProofsRequest request =
-        StreamProofsRequest.newBuilder().setClientId("linea-sequencer-rln-validator").build();
+    RlnProofFilter request =
+        RlnProofFilter.newBuilder().setAddress("").build(); // Empty address means all proofs
 
-    asyncProofStub.streamProofs(
+    asyncProofStub.getProofs(
         request,
         new StreamObserver<>() {
           @Override
-          public void onNext(ProofMessage proofMessage) {
+          public void onNext(RlnProofReply proofMessage) {
             if (proofMessage.hasProof()) {
-              RlnProofMessage rlnProofMessage = proofMessage.getProof();
+              RlnProof rlnProofMessage = proofMessage.getProof();
               String txHashHex =
                   Bytes.wrap(rlnProofMessage.getTxHash().toByteArray()).toHexString();
               LOG.debug("Received proof from gRPC stream for txHash: {}", txHashHex);

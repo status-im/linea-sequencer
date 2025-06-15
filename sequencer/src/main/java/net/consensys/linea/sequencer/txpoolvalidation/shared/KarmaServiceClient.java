@@ -23,9 +23,11 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.Status;
 import io.grpc.StatusRuntimeException;
-import net.consensys.linea.rln.proofs.grpc.GetKarmaRequest;
-import net.consensys.linea.rln.proofs.grpc.KarmaResponse;
-import net.consensys.linea.rln.proofs.grpc.KarmaServiceGrpc;
+import net.vac.prover.GetUserTierInfoReply;
+import net.vac.prover.GetUserTierInfoRequest;
+import net.vac.prover.RlnProverGrpc;
+import net.vac.prover.UserTierInfoError;
+import net.vac.prover.UserTierInfoResult;
 import org.hyperledger.besu.datatypes.Address;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -65,7 +67,7 @@ public class KarmaServiceClient implements Closeable {
 
   private final String serviceName;
   private ManagedChannel channel;
-  private KarmaServiceGrpc.KarmaServiceBlockingStub stub;
+  private RlnProverGrpc.RlnProverBlockingStub stub;
 
   /**
    * Creates a new Karma Service client with the specified configuration.
@@ -124,7 +126,7 @@ public class KarmaServiceClient implements Closeable {
     }
 
     this.stub =
-        KarmaServiceGrpc.newBlockingStub(this.channel)
+        RlnProverGrpc.newBlockingStub(this.channel)
             .withDeadlineAfter(timeoutMs, TimeUnit.MILLISECONDS);
 
     LOG.info("{}: Karma Service client initialized successfully", serviceName);
@@ -145,31 +147,62 @@ public class KarmaServiceClient implements Closeable {
       return Optional.empty();
     }
 
-    GetKarmaRequest request =
-        GetKarmaRequest.newBuilder().setUserAddress(userAddress.toHexString()).build();
+    // Convert Besu Address to protobuf Address
+    net.vac.prover.Address protoAddress =
+        net.vac.prover.Address.newBuilder()
+            .setValue(com.google.protobuf.ByteString.copyFrom(userAddress.toArrayUnsafe()))
+            .build();
+
+    GetUserTierInfoRequest request =
+        GetUserTierInfoRequest.newBuilder().setUser(protoAddress).build();
 
     try {
       LOG.debug(
           "{}: Fetching karma info for user {} via gRPC", serviceName, userAddress.toHexString());
-      KarmaResponse response = stub.getKarma(request);
+      GetUserTierInfoReply response = stub.getUserTierInfo(request);
 
-      LOG.debug(
-          "{}: Karma service response for {}: tier={}, epochTxCount={}, dailyQuota={}, epochId={}, karmaBalance={}",
-          serviceName,
-          userAddress.toHexString(),
-          response.getTier(),
-          response.getEpochTxCount(),
-          response.getDailyQuota(),
-          response.getEpochId(),
-          response.getKarmaBalance());
+      // Handle the oneof response structure
+      if (response.hasRes()) {
+        UserTierInfoResult result = response.getRes();
 
-      return Optional.of(
-          new KarmaInfo(
-              response.getTier(),
-              response.getEpochTxCount(),
-              response.getDailyQuota(),
-              response.getEpochId(),
-              response.getKarmaBalance()));
+        // Extract tier info
+        String tierName = result.hasTier() ? result.getTier().getName() : "Unknown";
+        int dailyQuota = result.hasTier() ? (int) result.getTier().getQuota() : 0;
+
+        LOG.debug(
+            "{}: Karma service response for {}: tier={}, epochTxCount={}, dailyQuota={}, epoch={}, epochSlice={}",
+            serviceName,
+            userAddress.toHexString(),
+            tierName,
+            result.getTxCount(),
+            dailyQuota,
+            result.getCurrentEpoch(),
+            result.getCurrentEpochSlice());
+
+        return Optional.of(
+            new KarmaInfo(
+                tierName,
+                (int) result.getTxCount(),
+                dailyQuota,
+                String.valueOf(
+                    result.getCurrentEpoch()), // Convert epoch to string for compatibility
+                0L)); // karma balance not in new schema, set to 0
+
+      } else if (response.hasError()) {
+        UserTierInfoError error = response.getError();
+        LOG.warn(
+            "{}: Karma service error for user {}: {}",
+            serviceName,
+            userAddress.toHexString(),
+            error.getMessage());
+        return Optional.empty();
+      } else {
+        LOG.warn(
+            "{}: Karma service returned empty response for user {}",
+            serviceName,
+            userAddress.toHexString());
+        return Optional.empty();
+      }
 
     } catch (StatusRuntimeException e) {
       Status.Code code = e.getStatus().getCode();

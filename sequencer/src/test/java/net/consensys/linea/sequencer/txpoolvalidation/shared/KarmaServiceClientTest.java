@@ -15,7 +15,6 @@
 package net.consensys.linea.sequencer.txpoolvalidation.shared;
 
 import static org.junit.jupiter.api.Assertions.*;
-import static org.mockito.Mockito.*;
 
 import java.io.IOException;
 import java.util.Optional;
@@ -27,10 +26,13 @@ import io.grpc.Status;
 import io.grpc.inprocess.InProcessChannelBuilder;
 import io.grpc.inprocess.InProcessServerBuilder;
 import io.grpc.stub.StreamObserver;
-import net.consensys.linea.rln.proofs.grpc.GetKarmaRequest;
-import net.consensys.linea.rln.proofs.grpc.KarmaResponse;
-import net.consensys.linea.rln.proofs.grpc.KarmaServiceGrpc;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient.KarmaInfo;
+import net.vac.prover.GetUserTierInfoReply;
+import net.vac.prover.GetUserTierInfoRequest;
+import net.vac.prover.RlnProverGrpc;
+import net.vac.prover.Tier;
+import net.vac.prover.UserTierInfoError;
+import net.vac.prover.UserTierInfoResult;
 import org.hyperledger.besu.datatypes.Address;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -51,11 +53,11 @@ class KarmaServiceClientTest {
 
   private static final Logger LOG = LoggerFactory.getLogger(KarmaServiceClientTest.class);
 
-  private static class MockKarmaServiceImpl extends KarmaServiceGrpc.KarmaServiceImplBase {
+  private static class MockRlnProverImpl extends RlnProverGrpc.RlnProverImplBase {
     private boolean shouldTimeout = false;
     private boolean shouldThrowNotFound = false;
     private boolean shouldThrowError = false;
-    private KarmaResponse responseToReturn;
+    private GetUserTierInfoReply responseToReturn;
 
     public void setShouldTimeout(boolean shouldTimeout) {
       this.shouldTimeout = shouldTimeout;
@@ -69,12 +71,13 @@ class KarmaServiceClientTest {
       this.shouldThrowError = shouldThrowError;
     }
 
-    public void setResponseToReturn(KarmaResponse response) {
+    public void setResponseToReturn(GetUserTierInfoReply response) {
       this.responseToReturn = response;
     }
 
     @Override
-    public void getKarma(GetKarmaRequest request, StreamObserver<KarmaResponse> responseObserver) {
+    public void getUserTierInfo(
+        GetUserTierInfoRequest request, StreamObserver<GetUserTierInfoReply> responseObserver) {
       if (shouldTimeout) {
         // Simulate timeout by delaying longer than client timeout
         try {
@@ -107,21 +110,21 @@ class KarmaServiceClientTest {
     }
   }
 
-  private MockKarmaServiceImpl mockKarmaService;
+  private MockRlnProverImpl mockRlnProver;
   private Server mockServer;
   private ManagedChannel inProcessChannel;
   private KarmaServiceClient karmaServiceClient;
 
   @BeforeEach
   void setUp() throws IOException {
-    mockKarmaService = new MockKarmaServiceImpl();
+    mockRlnProver = new MockRlnProverImpl();
 
     String serverName = InProcessServerBuilder.generateName();
 
     mockServer =
         InProcessServerBuilder.forName(serverName)
             .directExecutor()
-            .addService(mockKarmaService)
+            .addService(mockRlnProver)
             .build()
             .start();
 
@@ -165,38 +168,42 @@ class KarmaServiceClientTest {
 
   @Test
   void testSuccessfulKarmaFetch() {
-    // Given: Mock service returns valid karma response
-    KarmaResponse response =
-        KarmaResponse.newBuilder()
-            .setTier("Active")
-            .setEpochTxCount(5)
-            .setDailyQuota(120)
-            .setEpochId("2024-01-01T10")
-            .setKarmaBalance(1000L)
+    // Given: Mock service returns valid user tier info response
+    Tier tier = Tier.newBuilder().setName("Active").setQuota(120L).build();
+
+    UserTierInfoResult result =
+        UserTierInfoResult.newBuilder()
+            .setCurrentEpoch(1234567L)
+            .setCurrentEpochSlice(10L)
+            .setTxCount(5L)
+            .setTier(tier)
             .build();
-    mockKarmaService.setResponseToReturn(response);
+
+    GetUserTierInfoReply response = GetUserTierInfoReply.newBuilder().setRes(result).build();
+
+    mockRlnProver.setResponseToReturn(response);
 
     karmaServiceClient =
         new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
 
     // When: Fetch karma info
     Address testAddress = Address.fromHexString("0x1234567890123456789012345678901234567890");
-    Optional<KarmaInfo> result = karmaServiceClient.fetchKarmaInfo(testAddress);
+    Optional<KarmaInfo> karmaResult = karmaServiceClient.fetchKarmaInfo(testAddress);
 
     // Then: Should return karma info
-    assertTrue(result.isPresent());
-    KarmaInfo karmaInfo = result.get();
+    assertTrue(karmaResult.isPresent());
+    KarmaInfo karmaInfo = karmaResult.get();
     assertEquals("Active", karmaInfo.tier());
     assertEquals(5, karmaInfo.epochTxCount());
     assertEquals(120, karmaInfo.dailyQuota());
-    assertEquals("2024-01-01T10", karmaInfo.epochId());
-    assertEquals(1000L, karmaInfo.karmaBalance());
+    assertEquals("1234567", karmaInfo.epochId()); // epoch converted to string
+    assertEquals(0L, karmaInfo.karmaBalance()); // karma balance set to 0 in new schema
   }
 
   @Test
   void testUserNotFound() {
     // Given: Service returns NOT_FOUND
-    mockKarmaService.setShouldThrowNotFound(true);
+    mockRlnProver.setShouldThrowNotFound(true);
 
     karmaServiceClient =
         new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
@@ -212,7 +219,7 @@ class KarmaServiceClientTest {
   @Test
   void testServiceTimeout() {
     // Given: Service causes timeout
-    mockKarmaService.setShouldTimeout(true);
+    mockRlnProver.setShouldTimeout(true);
 
     karmaServiceClient =
         new KarmaServiceClient(
@@ -228,8 +235,13 @@ class KarmaServiceClientTest {
 
   @Test
   void testServiceError() {
-    // Given: Service returns internal error
-    mockKarmaService.setShouldThrowError(true);
+    // Given: Service returns error response in oneof
+    UserTierInfoError error =
+        UserTierInfoError.newBuilder().setMessage("User not registered").build();
+
+    GetUserTierInfoReply response = GetUserTierInfoReply.newBuilder().setError(error).build();
+
+    mockRlnProver.setResponseToReturn(response);
 
     karmaServiceClient =
         new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
@@ -243,39 +255,47 @@ class KarmaServiceClientTest {
   }
 
   @Test
-  void testClientWithoutProvidedChannel() {
-    // Given: Client created without pre-configured channel
+  void testServiceGrpcError() {
+    // Given: Service throws gRPC error
+    mockRlnProver.setShouldThrowError(true);
+
     karmaServiceClient =
-        new KarmaServiceClient("TestClient", "localhost", 9999, false, 500L); // Non-existent port
+        new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
 
-    // When: Check availability
-    boolean isAvailable = karmaServiceClient.isAvailable();
+    // When: Fetch karma info
+    Address testAddress = Address.fromHexString("0x1234567890123456789012345678901234567890");
+    Optional<KarmaInfo> result = karmaServiceClient.fetchKarmaInfo(testAddress);
 
-    // Then: Should be available (channel created but connection may fail on use)
-    assertTrue(isAvailable);
+    // Then: Should return empty due to gRPC error
+    assertFalse(result.isPresent());
+  }
+
+  @Test
+  void testClientWithoutProvidedChannel() {
+    // Given: Create client without pre-configured channel
+    karmaServiceClient = new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L);
+
+    // Then: Client should be available but not connected to our mock
+    assertTrue(karmaServiceClient.isAvailable());
   }
 
   @Test
   void testClientAvailability() {
-    // Given: Client with valid channel
+    // Given: Client with channel
     karmaServiceClient =
         new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
 
-    // When: Check availability
-    boolean isAvailable = karmaServiceClient.isAvailable();
-
     // Then: Should be available
-    assertTrue(isAvailable);
+    assertTrue(karmaServiceClient.isAvailable());
   }
 
   @Test
   void testClientUnavailableAfterClose() throws IOException {
-    // Given: Client with valid channel
+    // Given: Client with channel
     karmaServiceClient =
         new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
-    assertTrue(karmaServiceClient.isAvailable());
 
-    // When: Close the client
+    // When: Close client
     karmaServiceClient.close();
 
     // Then: Should not be available
@@ -284,39 +304,38 @@ class KarmaServiceClientTest {
 
   @Test
   void testTlsConfiguration() {
-    // Given: Client configured for TLS
-    karmaServiceClient = new KarmaServiceClient("TestClient", "localhost", 8080, true, 500L);
+    // Given: Create client with TLS enabled
+    karmaServiceClient = new KarmaServiceClient("TestClient", "localhost", 8443, true, 500L);
 
-    // When: Check if client was created
-    // Then: Should not throw exception during creation
+    // Then: Client should be created successfully
     assertNotNull(karmaServiceClient);
     assertTrue(karmaServiceClient.isAvailable());
   }
 
   @Test
   void testClientWithShutdownChannel() {
-    // Given: Pre-shutdown channel
+    // Given: Shutdown channel first
     inProcessChannel.shutdown();
 
     // When: Create client with shutdown channel
     karmaServiceClient =
         new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
 
-    // Then: Should create new channel instead of using provided one
+    // Then: Client should handle shutdown channel gracefully
     assertNotNull(karmaServiceClient);
   }
 
   @Test
   void testMultipleClose() throws IOException {
-    // Given: Client with valid channel
+    // Given: Client with channel
     karmaServiceClient =
         new KarmaServiceClient("TestClient", "localhost", 8080, false, 500L, inProcessChannel);
 
     // When: Close multiple times
     karmaServiceClient.close();
-    karmaServiceClient.close(); // Should not throw exception
+    karmaServiceClient.close(); // Should not throw
 
-    // Then: Should handle gracefully
+    // Then: Should not be available
     assertFalse(karmaServiceClient.isAvailable());
   }
 }

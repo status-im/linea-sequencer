@@ -35,12 +35,12 @@ import io.grpc.stub.StreamObserver;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.rln.jni.RlnBridge;
-import net.consensys.linea.rln.proofs.grpc.ProofMessage;
-import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
-import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.NullifierTracker;
+import net.vac.prover.RlnProofFilter;
+import net.vac.prover.RlnProofReply;
+import net.vac.prover.RlnProverGrpc;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Transaction;
@@ -88,21 +88,20 @@ class RlnVerifierValidatorTest {
   //
 
   // Define a nested class for the mock service implementation
-  private static class MockProofServiceImpl extends RlnProofServiceGrpc.RlnProofServiceImplBase {
-    private StreamObserver<ProofMessage> responseObserver; // To send messages to client
+  private static class MockProofServiceImpl extends RlnProverGrpc.RlnProverImplBase {
+    private StreamObserver<RlnProofReply> responseObserver; // To send messages to client
     private String clientId; // Store client ID for logging/debugging
 
     @Override
-    public void streamProofs(
-        StreamProofsRequest request, StreamObserver<ProofMessage> responseObserver) {
-      this.clientId = request.getClientId();
-      LOG.info("MockProofService: streamProofs called by client: {}", this.clientId);
+    public void getProofs(RlnProofFilter request, StreamObserver<RlnProofReply> responseObserver) {
+      this.clientId = "test-client"; // Set a default client ID
+      LOG.info("MockProofService: getProofs called with filter: {}", request.getAddress());
       this.responseObserver = responseObserver;
       // Keep the stream open, send messages on demand from tests
     }
 
     // Test helper to send a proof message
-    public void sendProof(ProofMessage proof) {
+    public void sendProof(RlnProofReply proof) {
       if (this.responseObserver != null) {
         LOG.info(
             "MockProofService (client: {}): Sending proof for txHash: {}",

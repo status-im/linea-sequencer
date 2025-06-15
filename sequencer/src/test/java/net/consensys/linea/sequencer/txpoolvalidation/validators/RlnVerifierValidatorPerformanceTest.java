@@ -36,12 +36,12 @@ import io.grpc.stub.StreamObserver;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
 import net.consensys.linea.config.LineaSharedGaslessConfiguration;
 import net.consensys.linea.rln.MockRlnVerificationService;
-import net.consensys.linea.rln.proofs.grpc.ProofMessage;
-import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
-import net.consensys.linea.rln.proofs.grpc.StreamProofsRequest;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.DenyListManager;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.KarmaServiceClient;
 import net.consensys.linea.sequencer.txpoolvalidation.shared.NullifierTracker;
+import net.vac.prover.RlnProofFilter;
+import net.vac.prover.RlnProofReply;
+import net.vac.prover.RlnProverGrpc;
 import org.apache.tuweni.bytes.Bytes;
 import org.hyperledger.besu.datatypes.Address;
 import org.hyperledger.besu.datatypes.Hash;
@@ -105,30 +105,28 @@ class RlnVerifierValidatorPerformanceTest {
   private final AtomicInteger maxConcurrentValidations = new AtomicInteger(0);
 
   /** High-throughput mock proof service for performance testing. */
-  private static class HighThroughputMockProofService
-      extends RlnProofServiceGrpc.RlnProofServiceImplBase {
-    private final List<StreamObserver<ProofMessage>> observers = new CopyOnWriteArrayList<>();
+  private static class HighThroughputMockProofService extends RlnProverGrpc.RlnProverImplBase {
+    private final List<StreamObserver<RlnProofReply>> observers = new CopyOnWriteArrayList<>();
     private final ExecutorService proofSender = Executors.newFixedThreadPool(4);
     private volatile boolean isRunning = true;
 
     @Override
-    public void streamProofs(
-        StreamProofsRequest request, StreamObserver<ProofMessage> responseObserver) {
+    public void getProofs(RlnProofFilter request, StreamObserver<RlnProofReply> responseObserver) {
       observers.add(responseObserver);
       LOG.debug(
-          "High-throughput proof service: Client {} connected, total observers: {}",
-          request.getClientId(),
+          "High-throughput proof service: Client connected with filter: {}, total observers: {}",
+          request.getAddress(),
           observers.size());
     }
 
-    public void sendProofBatch(List<ProofMessage> proofs) {
+    public void sendProofBatch(List<RlnProofReply> proofs) {
       if (!isRunning) return;
 
       proofSender.submit(
           () -> {
-            for (StreamObserver<ProofMessage> observer : observers) {
+            for (StreamObserver<RlnProofReply> observer : observers) {
               try {
-                for (ProofMessage proof : proofs) {
+                for (RlnProofReply proof : proofs) {
                   observer.onNext(proof);
                 }
               } catch (Exception e) {
@@ -141,7 +139,7 @@ class RlnVerifierValidatorPerformanceTest {
     public void shutdown() {
       isRunning = false;
       proofSender.shutdown();
-      for (StreamObserver<ProofMessage> observer : observers) {
+      for (StreamObserver<RlnProofReply> observer : observers) {
         try {
           observer.onCompleted();
         } catch (Exception e) {

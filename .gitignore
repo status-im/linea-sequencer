@@ -33,3 +33,4 @@ site/
 /.envrc
 acceptance-tests/bin/
 .vscode
+sequencer/bin
