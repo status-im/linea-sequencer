@@ -292,7 +292,8 @@ class RlnVerifierValidatorTest {
               denyListManager,
               mockKarmaServiceClient,
               nullifierTracker,
-              inProcessChannel);
+              inProcessChannel,
+              null); // null for RlnVerificationService - will use factory
     } catch (Throwable t) { // Catch Throwable to get all details
       LOG.error("Error during RlnVerifierValidator construction (direct catch)", t);
       if (t.getCause() != null) {
@@ -902,7 +903,8 @@ class RlnVerifierValidatorTest {
             denyListManager,
             downKarmaService,
             nullifierTracker,
-            inProcessChannel);
+            inProcessChannel,
+            null); // null for RlnVerificationService - will use factory
 
     String txHash = "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     Transaction mockTransaction = mock(Transaction.class);

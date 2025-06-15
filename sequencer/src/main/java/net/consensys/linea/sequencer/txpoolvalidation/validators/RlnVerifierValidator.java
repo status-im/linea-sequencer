@@ -44,7 +44,8 @@ import io.grpc.ManagedChannel;
 import io.grpc.ManagedChannelBuilder;
 import io.grpc.stub.StreamObserver;
 import net.consensys.linea.config.LineaRlnValidatorConfiguration;
-import net.consensys.linea.rln.jni.RlnBridge;
+import net.consensys.linea.rln.RlnVerificationService;
+import net.consensys.linea.rln.RlnVerificationServiceFactory;
 import net.consensys.linea.rln.proofs.grpc.ProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofMessage;
 import net.consensys.linea.rln.proofs.grpc.RlnProofServiceGrpc;
@@ -112,6 +113,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
   private final BlockchainService blockchainService;
   private final byte[] rlnVerifyingKeyBytes;
   private final DenyListManager denyListManager;
+  private final RlnVerificationService rlnVerificationService;
   private ScheduledExecutorService proofCacheEvictionScheduler;
 
   private final Map<String, CompletableFuture<CachedProof>> pendingProofs =
@@ -176,7 +178,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       DenyListManager denyListManager,
       KarmaServiceClient karmaServiceClient,
       NullifierTracker nullifierTracker) {
-    this(rlnConfig, blockchainService, denyListManager, karmaServiceClient, nullifierTracker, null);
+    this(rlnConfig, blockchainService, denyListManager, karmaServiceClient, nullifierTracker, null, null);
   }
 
   /**
@@ -184,7 +186,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
    * channel.
    *
    * <p>This constructor is primarily intended for testing scenarios where a mock proof gRPC channel
-   * needs to be injected.
+   * or mock RLN verification service needs to be injected.
    *
    * @param rlnConfig Configuration for RLN validation
    * @param blockchainService Blockchain service for accessing chain state
@@ -192,6 +194,7 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
    * @param karmaServiceClient Shared karma service client for quota validation
    * @param nullifierTracker Shared nullifier tracker for preventing proof reuse
    * @param providedProofChannel Optional pre-configured proof service channel for testing
+   * @param providedRlnService Optional pre-configured RLN verification service for testing
    */
   @VisibleForTesting
   RlnVerifierValidator(
@@ -200,13 +203,21 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
       DenyListManager denyListManager,
       KarmaServiceClient karmaServiceClient,
       NullifierTracker nullifierTracker,
-      ManagedChannel providedProofChannel) {
+      ManagedChannel providedProofChannel,
+      RlnVerificationService providedRlnService) {
     this.rlnConfig = rlnConfig;
     this.blockchainService = blockchainService;
     this.denyListManager = denyListManager;
     this.karmaServiceClient = karmaServiceClient;
     this.nullifierTracker = nullifierTracker;
     this.proofServiceChannel = providedProofChannel;
+    
+    // Initialize RLN verification service
+    if (providedRlnService != null) {
+      this.rlnVerificationService = providedRlnService;
+    } else {
+      this.rlnVerificationService = RlnVerificationServiceFactory.createAutoService();
+    }
 
     // Initialize LRU cache with TTL support
     this.rlnProofCache = Caffeine.newBuilder()
@@ -325,24 +336,24 @@ public class RlnVerifierValidator implements PluginTransactionPoolValidator, Clo
               String txHashHex = Bytes.wrap(rlnProofMessage.getTxHash().toByteArray()).toHexString();
               LOG.debug("Received proof from gRPC stream for txHash: {}", txHashHex);
               
-              // Parse the combined proof and extract public inputs using JNI
+              // Parse the combined proof and extract public inputs using verification service
               String currentEpochId = getCurrentEpochIdentifier();
               try {
-                String[] proofData = RlnBridge.parseAndVerifyRlnProof(
+                RlnVerificationService.RlnProofData proofData = rlnVerificationService.parseAndVerifyRlnProof(
                     rlnVerifyingKeyBytes,
                     rlnProofMessage.getProof().toByteArray(),
                     currentEpochId);
                 
-                if (proofData != null && proofData.length == 6 && "true".equals(proofData[5])) {
+                if (proofData != null && proofData.isValid()) {
                   CachedProof cachedProof =
                       new CachedProof(
                           rlnProofMessage.getProof().toByteArray(),
                           rlnProofMessage.getSender().toByteArray(),
-                          proofData[0], // share_x
-                          proofData[1], // share_y
-                          proofData[2], // epoch
-                          proofData[3], // root
-                          proofData[4], // nullifier
+                          proofData.shareX(), // share_x
+                          proofData.shareY(), // share_y
+                          proofData.epoch(), // epoch
+                          proofData.root(), // root
+                          proofData.nullifier(), // nullifier
                           Instant.now());
 
                   rlnProofCache.put(txHashHex, cachedProof);
