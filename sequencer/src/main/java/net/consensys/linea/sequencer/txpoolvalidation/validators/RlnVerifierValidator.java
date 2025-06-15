@@ -17,24 +17,19 @@ package net.consensys.linea.sequencer.txpoolvalidation.validators;
 import java.io.Closeable;
 import java.io.IOException;
 import java.math.BigInteger;
-import java.net.http.HttpClient;
 import java.nio.file.Files;
 import java.nio.file.Paths;
-import java.time.Duration;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
-import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.regex.Pattern;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.github.benmanes.caffeine.cache.Cache;
@@ -107,7 +102,6 @@ import org.slf4j.LoggerFactory;
  */
 public class RlnVerifierValidator implements PluginTransactionPoolValidator, Closeable {
   private static final Logger LOG = LoggerFactory.getLogger(RlnVerifierValidator.class);
-  private static final String RLN_VALIDATION_FAILED_MESSAGE = "RLN validation failed";
 
   private final LineaRlnValidatorConfiguration rlnConfig;
   private final BlockchainService blockchainService;

@@ -51,9 +51,9 @@ public class LineaRlnValidatorCliOptions implements LineaCliOptions {
 
   @CommandLine.Option(
       names = "--plugin-linea-rln-deny-list-path",
-      description = "Path to the deny list file (default: ${DEFAULT-VALUE})",
+      description = "Path to the gasless deny list file (default: ${DEFAULT-VALUE})",
       arity = "1")
-  private String denyListPath = "/var/lib/linea/deny_list.txt";
+  private String denyListPath = "/var/lib/besu/gasless-deny-list.txt";
 
   // === ADVANCED OPTIONS (most users won't need to change these) ===
 

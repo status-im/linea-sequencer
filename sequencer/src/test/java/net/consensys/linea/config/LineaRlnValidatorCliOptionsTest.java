@@ -36,7 +36,7 @@ class LineaRlnValidatorCliOptionsTest {
     assertEquals(50051, actualConfig.rlnProofServicePort());
     assertEquals("localhost", actualConfig.karmaServiceHost());
     assertEquals(50052, actualConfig.karmaServicePort());
-    assertEquals("/var/lib/linea/deny_list.txt", actualConfig.denyListPath());
+    assertEquals("/var/lib/besu/gasless-deny-list.txt", actualConfig.denyListPath());
 
     // Test auto-detected values
     assertFalse(actualConfig.rlnProofServiceUseTls()); // Should be false for default ports

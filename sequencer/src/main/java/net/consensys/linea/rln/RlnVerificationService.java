@@ -13,9 +13,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 package net.consensys.linea.rln;
-
-import java.util.Optional;
-
 /**
  * Service interface for RLN (Rate Limiting Nullifier) proof verification.
  * 
