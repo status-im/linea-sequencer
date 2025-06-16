@@ -79,7 +79,7 @@ public record LineaRlnValidatorConfiguration(
           200L, // rlnProofLocalWaitTimeoutMs (200ms)
           LineaSharedGaslessConfiguration.V1_DEFAULT,
           "localhost", // karmaServiceHost
-          50052, // karmaServicePort
+          50053, // karmaServicePort
           false, // karmaServiceUseTls
           5000L, // karmaServiceTimeoutMs (5 seconds)
           true, // exponentialBackoffEnabled

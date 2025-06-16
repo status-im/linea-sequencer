@@ -127,7 +127,8 @@ public class LineaTransactionPoolValidatorPlugin extends AbstractLineaRequiredPl
               l1L2BridgeSharedConfiguration(),
               rejectedTxJsonRpcManager,
               rlnValidatorConfiguration,
-              sharedServiceManager));
+              sharedServiceManager,
+              lineaRpcConfiguration().rlnProverForwarderEnabled()));
 
       if (metricCategoryRegistry.isMetricCategoryEnabled(TX_POOL_PROFITABILITY)) {
         final var besuEventsService =

@@ -37,6 +37,8 @@ public class LineaRpcConfiguration implements LineaOptionsConfiguration {
 
   @Builder.Default private final boolean gaslessTransactionsEnabled = false;
 
+  @Builder.Default private final boolean rlnProverForwarderEnabled = false;
+
   @Builder.Default private final double premiumGasMultiplier = 1.5;
 
   @Builder.Default private final boolean allowZeroGasEstimationForGasless = false;

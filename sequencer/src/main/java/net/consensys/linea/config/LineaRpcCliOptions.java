@@ -37,6 +37,11 @@ public class LineaRpcCliOptions implements LineaCliOptions {
   private static final String RPC_GASLESS_ENABLED = "--plugin-linea-rpc-gasless-enabled";
   private static final boolean DEFAULT_RPC_GASLESS_ENABLED = false;
 
+  // CLI options for RLN prover forwarder (RPC node mode)
+  private static final String RPC_RLN_PROVER_FORWARDER_ENABLED =
+      "--plugin-linea-rpc-rln-prover-forwarder-enabled";
+  private static final boolean DEFAULT_RPC_RLN_PROVER_FORWARDER_ENABLED = false;
+
   private static final String RPC_PREMIUM_GAS_MULTIPLIER =
       "--plugin-linea-rpc-premium-gas-multiplier";
   private static final double DEFAULT_RPC_PREMIUM_GAS_MULTIPLIER = 1.5; // Example default
@@ -70,6 +75,12 @@ public class LineaRpcCliOptions implements LineaCliOptions {
       description =
           "Enable gasless transaction features for linea_estimateGas (default: ${DEFAULT-VALUE})")
   private boolean gaslessTransactionsEnabled = DEFAULT_RPC_GASLESS_ENABLED;
+
+  @CommandLine.Option(
+      names = {RPC_RLN_PROVER_FORWARDER_ENABLED},
+      paramLabel = "<BOOLEAN>",
+      description = "Enable RLN prover forwarder for linea_estimateGas (default: ${DEFAULT-VALUE})")
+  private boolean rlnProverForwarderEnabled = DEFAULT_RPC_RLN_PROVER_FORWARDER_ENABLED;
 
   @CommandLine.Option(
       names = {RPC_PREMIUM_GAS_MULTIPLIER},
@@ -107,6 +118,7 @@ public class LineaRpcCliOptions implements LineaCliOptions {
     options.estimateGasCompatibilityModeEnabled = config.estimateGasCompatibilityModeEnabled();
     options.estimateGasCompatibilityMultiplier = config.estimateGasCompatibilityMultiplier();
     options.gaslessTransactionsEnabled = config.gaslessTransactionsEnabled();
+    options.rlnProverForwarderEnabled = config.rlnProverForwarderEnabled();
     options.premiumGasMultiplier = config.premiumGasMultiplier();
     options.allowZeroGasEstimationForGasless = config.allowZeroGasEstimationForGasless();
     return options;
@@ -123,6 +135,7 @@ public class LineaRpcCliOptions implements LineaCliOptions {
         .estimateGasCompatibilityModeEnabled(estimateGasCompatibilityModeEnabled)
         .estimateGasCompatibilityMultiplier(estimateGasCompatibilityMultiplier)
         .gaslessTransactionsEnabled(gaslessTransactionsEnabled)
+        .rlnProverForwarderEnabled(rlnProverForwarderEnabled)
         .premiumGasMultiplier(premiumGasMultiplier)
         .allowZeroGasEstimationForGasless(allowZeroGasEstimationForGasless)
         .sharedGaslessConfig(sharedConfig) // Inject the shared config
@@ -145,6 +158,7 @@ public class LineaRpcCliOptions implements LineaCliOptions {
         .add(ESTIMATE_GAS_COMPATIBILITY_MODE_ENABLED, estimateGasCompatibilityModeEnabled)
         .add(ESTIMATE_GAS_COMPATIBILITY_MODE_MULTIPLIER, estimateGasCompatibilityMultiplier)
         .add(RPC_GASLESS_ENABLED, gaslessTransactionsEnabled)
+        .add(RPC_RLN_PROVER_FORWARDER_ENABLED, rlnProverForwarderEnabled)
         .add(RPC_PREMIUM_GAS_MULTIPLIER, premiumGasMultiplier)
         .add(RPC_ALLOW_ZERO_GAS_ESTIMATION_GASLESS, allowZeroGasEstimationForGasless)
         .toString();

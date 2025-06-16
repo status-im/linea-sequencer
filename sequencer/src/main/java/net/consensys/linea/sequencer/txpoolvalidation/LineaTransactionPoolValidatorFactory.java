@@ -31,6 +31,7 @@ import net.consensys.linea.sequencer.txpoolvalidation.validators.AllowedAddressV
 import net.consensys.linea.sequencer.txpoolvalidation.validators.CalldataValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.GasLimitValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.ProfitabilityValidator;
+import net.consensys.linea.sequencer.txpoolvalidation.validators.RlnProverForwarderValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.RlnVerifierValidator;
 import net.consensys.linea.sequencer.txpoolvalidation.validators.SimulationValidator;
 import org.hyperledger.besu.datatypes.Address;
@@ -54,6 +55,7 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
   private final Optional<JsonRpcManager> rejectedTxJsonRpcManager;
   private final LineaRlnValidatorConfiguration rlnValidatorConf;
   private final SharedServiceManager sharedServiceManager;
+  private final boolean rlnProverForwarderEnabled;
 
   public LineaTransactionPoolValidatorFactory(
       final BesuConfiguration besuConfiguration,
@@ -66,7 +68,8 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
       final LineaL1L2BridgeSharedConfiguration l1L2BridgeConfiguration,
       final Optional<JsonRpcManager> rejectedTxJsonRpcManager,
       final LineaRlnValidatorConfiguration rlnValidatorConf,
-      final SharedServiceManager sharedServiceManager) {
+      final SharedServiceManager sharedServiceManager,
+      final boolean rlnProverForwarderEnabled) {
     this.besuConfiguration = besuConfiguration;
     this.blockchainService = blockchainService;
     this.transactionSimulationService = transactionSimulationService;
@@ -78,6 +81,7 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
     this.rejectedTxJsonRpcManager = rejectedTxJsonRpcManager;
     this.rlnValidatorConf = rlnValidatorConf;
     this.sharedServiceManager = sharedServiceManager;
+    this.rlnProverForwarderEnabled = rlnProverForwarderEnabled;
   }
 
   /**
@@ -96,7 +100,15 @@ public class LineaTransactionPoolValidatorFactory implements PluginTransactionPo
     validatorsList.add(
         new ProfitabilityValidator(besuConfiguration, blockchainService, profitabilityConf));
 
-    // Conditionally add RLN Validator
+    // Conditionally add RLN Prover Forwarder (enabled via configuration flag)
+    if (rlnProverForwarderEnabled) {
+      validatorsList.add(
+          new RlnProverForwarderValidator(
+              rlnValidatorConf, true // enabled
+              ));
+    }
+
+    // Conditionally add RLN Validator (for proof verification)
     if (rlnValidatorConf.rlnValidationEnabled()) {
       validatorsList.add(
           new RlnVerifierValidator(

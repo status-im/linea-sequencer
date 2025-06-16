@@ -63,7 +63,8 @@ class LineaRlnValidatorCliOptionsTest {
       "--plugin-linea-rln-deny-list-path=/custom/deny.txt",
       "--plugin-linea-rln-use-tls=true",
       "--plugin-linea-rln-premium-gas-threshold-gwei=20",
-      "--plugin-linea-rln-timeouts-ms=10000"
+      "--plugin-linea-rln-timeouts-ms=10000",
+      "--plugin-linea-rln-prover-forwarder-enabled=true"
     };
     new CommandLine(cliOptions).parseArgs(args);
 
