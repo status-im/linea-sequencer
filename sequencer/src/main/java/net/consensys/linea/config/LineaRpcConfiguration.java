@@ -19,6 +19,7 @@ import java.math.BigDecimal;
 
 import lombok.Builder;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.Setter;
 import lombok.ToString;
 import lombok.experimental.Accessors;
@@ -30,6 +31,26 @@ import net.consensys.linea.plugins.LineaOptionsConfiguration;
 @Getter
 @ToString
 public class LineaRpcConfiguration implements LineaOptionsConfiguration {
-  @Setter private volatile boolean estimateGasCompatibilityModeEnabled;
-  private BigDecimal estimateGasCompatibilityMultiplier;
+  @Builder.Default @Setter private volatile boolean estimateGasCompatibilityModeEnabled = false;
+
+  @Builder.Default private BigDecimal estimateGasCompatibilityMultiplier = BigDecimal.valueOf(1.2);
+
+  @Builder.Default private final boolean gaslessTransactionsEnabled = false;
+
+  @Builder.Default private final boolean rlnProverForwarderEnabled = false;
+
+  @Builder.Default private final double premiumGasMultiplier = 1.5;
+
+  @Builder.Default private final boolean allowZeroGasEstimationForGasless = false;
+
+  @NonNull private final LineaSharedGaslessConfiguration sharedGaslessConfig;
+
+  // Karma service configuration for gasless transaction quota validation
+  @Builder.Default private final String karmaServiceHost = "localhost";
+
+  @Builder.Default private final int karmaServicePort = 50052;
+
+  @Builder.Default private final boolean karmaServiceUseTls = false;
+
+  @Builder.Default private final long karmaServiceTimeoutMs = 5000L;
 }
